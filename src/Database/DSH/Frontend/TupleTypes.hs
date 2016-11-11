@@ -15,6 +15,13 @@ module Database.DSH.Frontend.TupleTypes
     , mkTranslateType
     , mkViewInstances
     , mkTupleAstComponents
+    , mkSubstTuple
+    , mkAddWhereProvenance
+    , mkLineageTransformTupleRHS
+    , mkQLTTupleInstances
+    , mkTypeLT
+    , mkLineageTransformTupleConst
+    , mkLineageTransformTupElem
     -- * Helper functions
     , innerConst
     , outerConst
@@ -24,7 +31,11 @@ module Database.DSH.Frontend.TupleTypes
     , tupTyConstName
     ) where
 
+import           Control.Monad
 import           Data.List
+import           Data.Proxy
+import           Data.Text   (Text)
+import           Data.Type.Equality
 import           Text.Printf
 
 import           Language.Haskell.TH
@@ -444,17 +455,12 @@ mkTupleCons tupTyName conName elemTyCons width = do
         -- a ~ (t1, ..., t<n>)
         tupConstraint    = equalConstrTy (VarT tupTyName) tupTy
 
-        -- Reify t1, ..., Reify t<n>
-        reifyConstraints = map (\n -> nameTyApp (mkName "Reify") (VarT n)) tupElemTyNames
-
-        constraints      = tupConstraint : reifyConstraints
-
     let -- '(Exp/Type t1) ... (Exp/Type t<n>)'
         elemTys = [ (strict, elemTyCons (VarT t))
                   | t <- tupElemTyNames
                   ]
 
-    return $ ForallC tyVarBinders constraints
+    return $ ForallC tyVarBinders [tupConstraint]
            $ NormalC (conName width) elemTys
   where
     strict = Bang NoSourceUnpackedness SourceStrict
@@ -465,10 +471,10 @@ mkTupleCons tupTyName conName elemTyCons width = do
 --
 -- @
 -- data TupleConst a where
---     Tuple<n>E :: (Reify t1, ..., Reify t<n>) => Exp t1
---                                              -> ...
---                                              -> Exp t<n>
---                                              -> TupleConst (t1, ..., t<n>)
+--     Tuple<n>E :: Exp t1
+--               -> ...
+--               -> Exp t<n>
+--               -> TupleConst (t1, ..., t<n>)
 -- @
 --
 -- Because TH does not directly support GADT syntax, we have to
@@ -476,10 +482,7 @@ mkTupleCons tupTyName conName elemTyCons width = do
 --
 -- @
 -- data TupleConst a =
---     forall t1, ..., t<n>. a ~ (t1, ..., t<n>),
---                           Reify t1,
---                           ...
---                           Reify t<n> =>
+--     forall t1, ..., t<n>. a ~ (t1, ..., t<n>) =>
 --                           Exp t1 -> ... -> Exp t<n>
 -- @
 mkTupleASTTy :: Name -> (Type -> Type) -> (Int -> Name) -> Int -> Q [Dec]
@@ -506,7 +509,335 @@ mkAstTupleType maxWidth =
 mkTupleAstComponents :: Int -> Q [Dec]
 mkTupleAstComponents maxWidth = (++) <$> mkAstTupleConst maxWidth <*> mkAstTupleType maxWidth
 
+------------------------------------------------------------
+-- Substitution into tuples
+------------------------------------------------------------
 
+-- Generate substitution lambda that traverses tuples and calls `subst` on
+-- every subcomponent of a tuple. Names of x and v are be passed by the caller
+--
+-- (\tuple -> case tuple of
+--      Tuple2E e1 e2    -> Tuple2E (subst x v e2) (subst x v e2)
+--      ...
+--      TupleNE e1 .. eN -> TupleNE (subst x v e1) .. (subst x v eN)
+
+mkSubstTuple :: Name -> Name -> Int -> Q Exp
+mkSubstTuple x v maxWidth = do
+    lamArgName <- newName "tuple"
+    matches <- mapM (mkSubstTupleMatch x v) [2..maxWidth]
+    let lamBody = CaseE (VarE lamArgName) matches
+    return $ LamE [VarP lamArgName] lamBody
+
+mkSubstTupleMatch :: Name -> Name -> Int -> Q Match
+mkSubstTupleMatch x v width = do
+  let names    = map (\c -> mkName [c]) $ take width ['a' .. 'z']
+      tupConst = innerConst "" width
+      tuplePat = ConP tupConst (map VarP names)
+      substs   =
+         map (\e -> AppE (AppE (AppE (VarE (mkName "subst")) (VarE x)) (VarE v))
+                         (VarE e)) names
+      rhs      = foldl' AppE (ConE tupConst) substs
+  return $ Match tuplePat (NormalB rhs) []
+
+------------------------------------------------------------
+-- Where-provenance transformation for table declarations --
+------------------------------------------------------------
+
+-- These functions don't exactly belong here because, conceptually, they deal
+-- with where-provenance.  However, where-provenance implementation relies
+-- heavily on tuples and so this module seemed like a natural place for these
+-- functions - all the required imports are already here.
+
+-- Generate function that adds where-provenance annotations to a table row:
+--
+-- \rowWidth row tableName provColumns keyIndices ->
+--   let addProvToColumn = (see letDecs quotation below)
+--   in case lamRowWidth of
+--       2 -> (see mkWhereProvenanceMatch)
+--       ...
+
+mkAddWhereProvenance :: Integer -> Q Exp
+mkAddWhereProvenance maxWidth = do
+    lamRowWidth <- newName "rowWidth"
+    lamRow      <- newName "row"
+    lamTable    <- newName "tableName"
+    lamProvCols <- newName "provColumns"
+    lamKeyInd   <- newName "keyIndices"
+    matches     <- mapM (mkWhereProvenanceMatch lamRow lamProvCols lamKeyInd)
+                        [2..maxWidth]
+    widthError  <- [| error "Incorrect tuple width" |]
+
+    letDecs <-
+          [d| addProvToColumn :: CL.Expr -> CL.Expr -> Maybe Text -> CL.Expr
+              addProvToColumn _   col Nothing        = col
+              addProvToColumn key col (Just colName) =
+                CP.tuple [col, CP.just $ CP.tuple [ CP.string $(varE lamTable)
+                                                  , CP.string colName, key]]
+
+              buildKey :: [CL.Expr] -> [Int] -> CL.Expr
+              buildKey tupleElems keyIndices =
+                  case length keyIndices of
+                    1 -> tupleElems !! (keyIndices !! 0)
+                    _ -> let keyElems = foldr (\i a -> tupleElems !! i : a)
+                                              [] keyIndices
+                         in CP.tuple keyElems
+             |]
+
+    let errorMatch = Match WildP (NormalB widthError) []
+        lamBody = LetE letDecs (CaseE (VarE lamRowWidth)
+                                      (matches ++ [errorMatch]))
+    return $ LamE [ VarP lamRowWidth, VarP lamRow    , VarP lamTable
+                  , VarP lamProvCols, VarP lamKeyInd ] lamBody
+
+-- let tupElem1 = CP.tupElem (intIndex 1) row
+--     (...)
+--     tupElemN = CP.tupElem (intIndex N) row
+--     tupElems = [ tupElem1, ..., tupElemN ]
+--     key      = buildKey tupElems keyIndices
+--     cols     = zipWith (addProvToColumn key) tupElems
+--                provColsNumbered
+-- in CP.tuple cols
+mkWhereProvenanceMatch :: Name -> Name -> Name -> Integer -> Q Match
+mkWhereProvenanceMatch row provColumns keyIndices width = do
+  let tupElemName :: Integer -> Name
+      tupElemName n = mkName $ "tupElem" ++ show n
+
+      tupElemsName, keyName, colsName :: Name
+      tupElemsName = mkName "tupElems"
+      keyName      = mkName "key"
+      colsName     = mkName "cols"
+
+      -- tupElemN = CP.tupElem (intIndex N) row
+      tupElem :: Integer -> Q Dec
+      tupElem elemIdx = do
+        let idxLit = litE $ IntegerL elemIdx
+        decBody <- [| CP.tupElem (intIndex $idxLit) $(varE row) |]
+        return $ ValD (VarP $ tupElemName elemIdx) (NormalB $ decBody) []
+
+  tupElemDecs <- mapM tupElem [1..width]
+
+  -- tupElems = [ tupElem1, ..., tupElemN ]
+  tupElemsE <- mapM (varE . tupElemName) [1..width]
+  let tupElemsDec = ValD (VarP tupElemsName) (NormalB $ ListE tupElemsE) []
+
+  -- key = buildKey tupElems keyIndices
+  keyBody <- [| $(varE $ mkName "buildKey") $(varE tupElemsName)
+                $(varE keyIndices) |]
+  let keyDec = ValD (VarP keyName) (NormalB keyBody) []
+
+  -- cols = zipWith (addProvToColumn key) tupElems
+  --                provColsNumbered
+  colsBody <- [| zipWith ($(varE $ mkName "addProvToColumn")
+                          $(varE keyName))
+                         $(varE tupElemsName) $(varE provColumns) |]
+  let colsDec = ValD (VarP colsName) (NormalB colsBody) []
+
+  -- CP.tuple cols
+  letBody <- [| CP.tuple $(varE colsName) |]
+
+  -- width -> let ... in [letBody]
+  return $ Match (LitP $ IntegerL width)
+                 (NormalB (LetE (tupElemDecs ++ [tupElemsDec, keyDec, colsDec])
+                          letBody)) []
+
+------------------------------------------------------------
+-- Lineage transformation for tuples                      --
+------------------------------------------------------------
+
+-- RHS of LineageTransform type family for tuples
+--
+-- (LineageTransform a1 k, ..., LineageTransform aN k)
+mkLineageTransformTupleRHS :: [Name] -> Name -> Q Type
+mkLineageTransformTupleRHS names k = do
+    let tfCall p = AppT (AppT (ConT (mkName "LineageTransform")) (VarT p))
+                              (VarT k)
+        tupleComponents = map tfCall names
+    return (tupleType tupleComponents)
+
+
+-- QLT instances for tuples:
+--
+-- instance (QLT a1, ..., QLT an) => QLT (a1, ..., an) where
+--    type LT (a1, ..., an) k = (LT a1 k, ..., LT an k)
+--    ltEq _ k =
+--         case (ltEq (Proxy :: Proxy a1) k, ..., ltEq (Proxy :: Proxy an) k) of
+--           (Refl, Refl) -> Refl
+mkQLTTupleInstances :: Int -> Q [Dec]
+mkQLTTupleInstances maxWidth =
+  mapM mkQLTTupleInstance [2..maxWidth]
+
+mkQLTTupleInstance :: Int -> Q Dec
+mkQLTTupleInstance n = do
+  ns <- mkNames "a" n
+  k  <- newName "k"
+  let qlt t   = AppT (ConT (mkName "QLT")) t
+      -- (QLT a1, ..., QLT an)
+      qltCtx  = map (\name -> qlt (VarT name)) ns
+      -- QLT (a1, ..., an)
+      qltHead = qlt (tupleType (map (\name -> VarT name) ns))
+      -- type instance LT (a1, ..., an) k = (LT a1 k, ..., LT an k)
+      ltDec   = TySynInstD (mkName "LT") (TySynEqn
+                 [tupleType (map VarT ns), VarT k]
+                 (tupleType (map (\name -> foldl' AppT (ConT (mkName "LT"))
+                                                 [VarT name, VarT k] ) ns)))
+      -- ltEq (Proxy :: Proxy name) k
+      proxy name = foldl' AppE (VarE (mkName "ltEq"))
+                         [ SigE (ConE 'Proxy) (AppT (ConT ''Proxy) (VarT name))
+                         , VarE k]
+
+      -- ltEq _ k =
+      --   case (ltEq (Proxy :: Proxy a1) k, ..., ltEq (Proxy :: Proxy an) k) of
+      --     (Refl, Refl) -> Refl
+      lteqDec = FunD (mkName "ltEq") [Clause [WildP, VarP k]
+               (NormalB $ CaseE (TupE (map proxy ns))
+                 [Match (TupP (map (const (ConP 'Refl [])) ns))
+                        (NormalB (ConE 'Refl)) []]) []]
+
+  return (InstanceD Nothing qltCtx qltHead [ltDec, lteqDec])
+
+-- Handling of tuple types in typeLT function
+--
+-- case tupleT of
+--   Tuple2T a1 a2 -> TupleT (Tuple2T (typeLT a1 k) (typeLT a2 k))
+--   ....
+--   TupleNT a1 ... an -> TupleT (TupleNT (typeLT a1 k) ... (typeLT an k))
+mkTypeLT :: Name -> Int -> Q Exp
+mkTypeLT k maxWidth = do
+    tyName     <- newName "tupleT"
+    matches    <- mapM (mkTypeLTMatch k) [2..maxWidth]
+    let lamBody = CaseE (VarE tyName) matches
+    return $ LamE [VarP tyName] lamBody
+
+mkTypeLTMatch :: Name -> Int -> Q Match
+mkTypeLTMatch k n = do
+  ns <- mkNames "a" n
+  let pat = ConP (tupTyConstName "" n) (map VarP ns)
+      typeLTs = map (\name -> AppE (AppE (VarE (mkName "typeLT"))
+                                         (VarE name)) (VarE k)) ns
+      bodyE = AppE (ConE (mkName "TupleT"))
+                   (foldl' AppE (ConE (tupTyConstName "" n)) typeLTs)
+  return (Match pat (NormalB bodyE) [])
+
+-- Lineage transformation for tuples (TupleConst constructors)
+mkLineageTransformTupleConst :: Name -> Name -> Int -> Q Exp
+mkLineageTransformTupleConst tyA tyK maxWidth = do
+    lamArgName <- newName "tupleE"
+    matches    <- mapM (mkLineageTransformTermMatch tyA tyK) [2..maxWidth]
+    let lamBody = CaseE (VarE lamArgName) matches
+    return $ LamE [VarP lamArgName] lamBody
+
+-- TupleNE a1 ... aN = do
+--    let ty1 = case tyA of
+--                TupleT (TupleNT t ... _) -> t
+--        ...
+--        tyN = case tyA of
+--                TupleT (TupleNT _ ... t) -> t
+--     a1' <- lineageTransform ty1 tyK a1
+--     --
+--     aN' <- lineageTransform tyN tyK aN
+--     return (TupleConstE (TupleNE a1' ... aN')
+mkLineageTransformTermMatch :: Name -> Name -> Int -> Q Match
+mkLineageTransformTermMatch tyA tyK width = do
+  tyPatName <- newName "t"
+  tupNames  <- mkNames "a" width
+  tupNames' <- mkNames "b" width
+
+  let tyName :: Int -> Name
+      tyName n = mkName $ "ty" ++ show n
+
+      -- (TupleN _ ... t ... _)
+      mkPats :: Int -> Int -> [Pat] -> [Pat]
+      mkPats n m acc | n == m    = mkPats n (m - 1) (VarP tyPatName : acc)
+                     | m == 0    = acc
+                     | otherwise = mkPats n (m - 1) (WildP : acc)
+
+      -- tyN = match tyA with
+      --            TupleT (TupleN _ ... t ... _) -> t
+      tyBody :: Int -> Dec
+      tyBody n = FunD (tyName n)
+        [ Clause []
+          (NormalB $ CaseE (VarE tyA)
+            [Match (ConP (mkName "TupleT") [ConP (tupTyConstName "" width)
+                                           (mkPats n width [])])
+                       (NormalB $ VarE tyPatName) []]) []]
+
+      tyDecs = map tyBody [1..width]
+
+      -- aN' <- lineageTransform tyN tyK aN
+      mkRecCall :: (Name, Name, Int) -> Stmt
+      mkRecCall (a, a', n) =
+          BindS (VarP a')
+                -- "lineageTransform" - fragile!
+                (AppE (AppE (AppE (VarE (mkName "lineageTransform"))
+                                  (VarE (tyName n))) (VarE tyK)) (VarE a))
+
+      recCalls = map mkRecCall (zip3 tupNames tupNames' [1..])
+
+  retTuple <- mkTupConstTerm (map VarE tupNames')
+
+  let retStmt = NoBindS (AppE (VarE 'Prelude.return) retTuple)
+
+  return (Match (ConP (innerConst "" width) (map VarP tupNames))
+                    (NormalB $ DoE $ [LetS tyDecs] ++ recCalls ++ [retStmt])
+                    [])
+
+-- Lineage transformation for tuple projections (TupElem constructors)
+--
+-- \tupElem -> case tupElem of
+--    Tup2_1 -> do let tyA' = TupleT (Tuple2T tyA impossible)
+--                 arg' <- lineageTransform tyA' tyK arg
+--                 return (AppE (TupElem Tup2_1) arg')
+--
+--    TupN_M -> do let tyA' = TupleT (TupleNT impossible ...
+--                                            tyA ... impossible)
+--                 arg' <- lineageTransform tyA' tyK arg
+--                 return (AppE (TupElem TupN_M) arg')
+mkLineageTransformTupElem :: Name -> Name -> Name -> Int -> Q Exp
+mkLineageTransformTupElem tyA tyK arg maxWidth = do
+    lamArgName <- newName "tupElem"
+    matches    <-
+        liftM concat (mapM (mkLineageTransformTupElemMatches tyA tyK arg)
+                           [2..maxWidth])
+    let lamBody = CaseE (VarE lamArgName) matches
+    return $ LamE [VarP lamArgName] lamBody
+
+mkLineageTransformTupElemMatches :: Name -> Name -> Name -> Int -> Q [Match]
+mkLineageTransformTupElemMatches tyA tyK arg n =
+    mapM (mkLineageTransformTupElemMatch tyA tyK arg n) [1..n]
+
+mkLineageTransformTupElemMatch :: Name -> Name -> Name -> Int -> Int -> Q Match
+mkLineageTransformTupElemMatch tyA tyK arg n m = do
+  tyA' <- newName "tyA"
+  arg' <- newName "arg"
+  let -- impossible ... tyA ... impossible
+      -- l positions, call to tyA on k-th
+      mkExps :: Int -> Int -> [Exp] -> Q [Exp]
+      mkExps k l acc | k == l    = mkExps k (l - 1) (VarE tyA : acc)
+                     | l == 0    = return acc
+                     | otherwise = do
+                        imp <- impossible
+                        mkExps k (l - 1) (imp : acc)
+
+  exps <- mkExps m n []
+
+  let -- let tyA' = TupleT (Tuple2T tyA impossible)
+      letSt = LetS [FunD tyA' [Clause []
+                   (NormalB (AppE (ConE (mkName "TupleT"))
+                      (foldl' AppE (ConE (tupTyConstName "" n)) exps)))
+                   []]]
+      -- arg' <- lineageTransform tyA' tyK arg
+      ltCallSt =
+          BindS (VarP arg')
+                -- "lineageTransform" - fragile!
+                (AppE (AppE (AppE (VarE (mkName "lineageTransform"))
+                                  (VarE tyA')) (VarE tyK)) (VarE arg))
+
+  retE <- mkTupElemTerm n m (VarE arg')
+
+  let retSt = NoBindS (AppE (VarE 'Prelude.return) retE)
+
+  return (Match (ConP (tupAccName n m) [])
+                (NormalB (DoE [letSt, ltCallSt, retSt])) [])
 
 --------------------------------------------------------------------------------
 -- Helper functions
@@ -550,7 +881,8 @@ qName = mkName "Q"
 mkTupElemTerm :: Int -> Int -> Exp -> Q Exp
 mkTupElemTerm width idx arg = do
     let ta = ConE $ tupAccName width idx
-    return $ AppE (AppE (ConE $ mkName "AppE") (AppE (ConE $ mkName "TupElem") ta)) arg
+    return $ AppE (AppE (ConE $ mkName "AppE")
+                        (AppE (ConE $ mkName "TupElem") ta)) arg
 
 -- | From a list of operand terms, construct a DSH tuple term.
 mkTupConstTerm :: [Exp] -> Q Exp
@@ -558,3 +890,6 @@ mkTupConstTerm ts
     | length ts <= 16 = return $ AppE (ConE $ mkName "TupleConstE")
                                $ foldl' AppE (ConE $ innerConst "" $ length ts) ts
     | otherwise       = impossible
+
+mkNames :: String -> Int -> Q [Name]
+mkNames a width = mapM (\_ -> newName a) [1..width]

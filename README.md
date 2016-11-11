@@ -43,14 +43,15 @@ backend package needs to be installed. Currently, the package
 
 1. [Ulrich, Grust. The Flatter, the Better - Query Compilation Based on the Flattening Transformation. Proc. SIGMOD 2015](http://db.inf.uni-tuebingen.de/publications/TheFlatter-theBetter-QueryCompilationBasedontheFlatteningTransformation.html).
 2. [Grust et al. Bringing Back Monad Comprehensions. Haskell Symposium 2011](http://db.inf.uni-tuebingen.de/staticfiles/publications/haskell2011.pdf).
+3. [Stolarek, Cheney. Language-integrated Provenance in Haskell](http://ics.p.lodz.pl/~stolarek/_media/pl:research:stolarek_cheney_language_integrated_provenance_in_haskell.pdf)
 
 # Release Notes
 
 * This is an experimental proof-of-concept implementation that most
   likely contains bugs. You have been warned. We are happy to receive
   bug reports.
-* For documentation, have a look at the examples included in directory
-  'examples' in the source distribution.
+* For documentation, have a look at the examples in 'dsh-example-queries'
+  library.
 * DSH works with a HDBC PostgreSQL connection. Other databases (*e.g.*
   MySQL, Sqlite) are unlikely to work.
 * Support for general algebraic data types is currently broken. Flat

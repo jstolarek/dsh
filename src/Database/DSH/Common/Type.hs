@@ -14,6 +14,7 @@ module Database.DSH.Common.Type
     , tupleElemTypes
     , fstT
     , sndT
+    , discardWhereProvType
     , listDepth
     , extractShape
     , unliftTypeN
@@ -88,6 +89,17 @@ isNum (ScalarT DateT)       = False
 scalarType :: Type -> Maybe ScalarType
 scalarType (ScalarT t) = Just t
 scalarType _           = Nothing
+
+discardWhereProvType :: Type -> Type
+-- Captures where-provenance annotation
+discardWhereProvType (TupleT [ ScalarT t
+                             , TupleT [ ScalarT BoolT
+                                      , TupleT [ ScalarT StringT
+                                               , ScalarT StringT
+                                               , _ ]]]) = ScalarT t
+discardWhereProvType (ScalarT t) = ScalarT t
+discardWhereProvType (ListT   t) = ListT (discardWhereProvType t)
+discardWhereProvType (TupleT  t) = TupleT $ map discardWhereProvType t
 
 --------------------------------------------------------------------------------
 -- Smart constructors and deconstructors for regular types

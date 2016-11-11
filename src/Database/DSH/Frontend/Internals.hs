@@ -18,6 +18,7 @@ import           Data.Scientific
 import           Data.List.NonEmpty               (NonEmpty)
 import           Data.Text                        (Text)
 import           Data.Time.Calendar               (Day)
+import           Data.Typeable
 import           Text.PrettyPrint.ANSI.Leijen
 
 import           Database.DSH.Common.Impossible
@@ -41,11 +42,12 @@ data Exp a where
     DecimalE    :: !Decimal -> Exp Decimal
     ScientificE :: !Scientific -> Exp Scientific
     DayE        :: !Day     -> Exp Day
-    ListE       :: (Reify a)           => !(S.Seq (Exp a)) -> Exp [a]
-    AppE        :: (Reify a, Reify b)  => Fun a b -> Exp a -> Exp b
-    LamE        :: (Reify a, Reify b)  => (Exp a -> Exp b) -> Exp (a -> b)
-    VarE        :: (Reify a)           => Integer -> Exp a
-    TableE      :: (Reify a)           => Table -> Exp [a]
+    ListE       :: Type a -> !(S.Seq (Exp a)) -> Exp [a]
+    AppE        :: Fun a b -> Exp a -> Exp b
+    LamE        :: Type a -> (Integer -> Exp b) -> Exp (a -> b)
+    VarE        :: Type a -> Integer -> Exp a
+    TableE      :: (Reify a, Typeable k)
+                => Table -> (Integer -> Exp k) -> Exp [a]
     TupleConstE :: !(TupleConst a) -> Exp a
 
 data Type a where
@@ -58,8 +60,8 @@ data Type a where
     DecimalT    :: Type Decimal
     ScientificT :: Type Scientific
     DayT        :: Type Day
-    ListT       :: (Reify a)          => Type a -> Type [a]
-    ArrowT      :: (Reify a,Reify b)  => Type a -> Type b -> Type (a -> b)
+    ListT       :: Type a -> Type [a]
+    ArrowT      :: Type a -> Type b -> Type (a -> b)
     TupleT      :: TupleType a -> Type a
 
 instance Pretty (Type a) where
@@ -106,29 +108,35 @@ class View a where
 
 newtype Q a = Q (Exp (Rep a))
 
-pairE :: (Reify a, Reify b) => Exp a -> Exp b -> Exp (a, b)
+pairE :: Exp a -> Exp b -> Exp (a, b)
 pairE a b = TupleConstE (Tuple2E a b)
 
-tripleE :: (Reify a, Reify b, Reify c) => Exp a -> Exp b -> Exp c -> Exp (a, b, c)
+tripleE :: Exp a -> Exp b -> Exp c -> Exp (a, b, c)
 tripleE a b c = TupleConstE (Tuple3E a b c)
 
 --------------------------------------------------------------------------------
 -- Definition of database-resident tables
 
 -- | A combination of column names that form a candidate key
-newtype Key = Key (NonEmpty String) deriving (Eq, Ord, Show)
+newtype Key = Key { unKey :: NonEmpty String } deriving (Eq, Ord, Show)
 
 -- | Is the table guaranteed to be not empty?
 data Emptiness = NonEmpty
                | PossiblyEmpty
                deriving (Eq, Ord, Show)
 
+-- | Do we track where-provenance, and if so then for which fields?
+data Provenance = NoProvenance
+                | WhereProvenance (NonEmpty String)
+                deriving (Eq, Ord, Show)
+
 type ColName = String
 
 -- | Catalog information hints that users may give to DSH
 data TableHints = TableHints
-    { keysHint     :: NonEmpty Key
-    , nonEmptyHint :: Emptiness
+    { keysHint       :: NonEmpty Key
+    , nonEmptyHint   :: Emptiness
+    , provenanceHint :: Provenance
     } deriving (Eq, Ord, Show)
 
 data Table = TableDB String (NonEmpty ColName) TableHints
@@ -173,8 +181,11 @@ instance (Reify a, Reify b) => Reify (a -> b) where
 unQ :: Q a -> Exp (Rep a)
 unQ (Q e) = e
 
-toLam :: (QA a,QA b) => (Q a -> Q b) -> Exp (Rep a) -> Exp (Rep b)
-toLam f = unQ . f . Q
+toLam :: (QA a, QA b) => (Q a -> Q b) -> Integer -> Exp (Rep b)
+toLam f = unQ . f . Q . (VarE reifyTy)
+
+reifyTy :: forall a. Reify a => Type a
+reifyTy = reify (undefined :: a)
 
 -- * Generate Reify instances for tuple types
 mkReifyInstances 16

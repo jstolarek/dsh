@@ -1,9 +1,11 @@
+{-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE GADTs                 #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TemplateHaskell       #-}
 {-# LANGUAGE TypeFamilies          #-}
 {-# LANGUAGE ViewPatterns          #-}
+{-# LANGUAGE ScopedTypeVariables   #-}
 
 {-# OPTIONS_GHC -Wno-redundant-constraints #-}
 
@@ -18,6 +20,7 @@ import           Prelude                          (Bool (..), Char, Double,
 import qualified Prelude                          as P
 
 import           Data.Decimal
+import           Data.Default
 import           Data.List.NonEmpty               (NonEmpty)
 import           Data.Scientific
 import qualified Data.Sequence                    as S
@@ -25,13 +28,13 @@ import           Data.String
 import           Data.Text                        (Text)
 import qualified Data.Text                        as T
 import           Data.Time.Calendar               (Day)
+import           Data.Typeable
 import           GHC.Exts                         (fromList, toList)
 
 import           Database.DSH.Common.Impossible
 import           Database.DSH.Frontend.Builtins
 import           Database.DSH.Frontend.Internals
 import           Database.DSH.Frontend.TupleTypes
-
 
 -- QA Instances
 
@@ -91,25 +94,25 @@ instance QA Day where
 
 instance (QA a) => QA [a] where
     type Rep [a] = [Rep a]
-    toExp as = ListE (P.fmap toExp $ fromList as)
-    frExp (ListE as) = toList $ P.fmap frExp as
+    toExp as = ListE reifyTy (P.fmap toExp $ fromList as)
+    frExp (ListE _ as) = toList $ P.fmap frExp as
     frExp _ = $impossible
 
-instance (QA a) => QA (Maybe a) where
-    type Rep (Maybe a) = [Rep a]
-    toExp Nothing = ListE S.empty
-    toExp (Just a) = ListE (S.singleton $ toExp a)
-    frExp (ListE s) =
-        case S.viewl s of
-            S.EmptyL -> Nothing
-            a S.:< _ -> Just (frExp a)
+instance (QA a, Default a) => QA (Maybe a) where
+    type Rep (Maybe a) = (Rep Bool, Rep a)
+    toExp Nothing  = pairE (BoolE False) (toExp (def :: a))
+    toExp (Just a) = pairE (BoolE True ) (toExp a)
+    frExp (TupleConstE (Tuple2E (BoolE True ) a)) = Just (frExp a)
+    frExp (TupleConstE (Tuple2E (BoolE False) _)) = Nothing
     frExp _ = $impossible
 
 instance (QA a,QA b) => QA (Either a b) where
     type Rep (Either a b) = ([Rep a],[Rep b])
-    toExp (Left a) = pairE (ListE (S.singleton $ toExp a)) (ListE S.empty)
-    toExp (Right b) = pairE (ListE S.empty) (ListE $ S.singleton $ toExp b)
-    frExp (TupleConstE (Tuple2E (ListE s1) (ListE s2))) =
+    toExp (Left a)  = pairE (ListE reifyTy (S.singleton $ toExp a))
+                            (ListE reifyTy S.empty)
+    toExp (Right b) = pairE (ListE reifyTy S.empty)
+                            (ListE reifyTy $ S.singleton $ toExp b)
+    frExp (TupleConstE (Tuple2E (ListE _ s1) (ListE _ s2))) =
         case (S.viewl s1, S.viewl s2) of
             (a S.:< _, _) -> Left (frExp a)
             (_, a S.:< _) -> Right (frExp a)
@@ -146,7 +149,7 @@ instance (QA a,QA b,QA r) => Elim (a,b) r where
     type Eliminator (a,b) r = (Q a -> Q b -> Q r) -> Q r
     elim q f = f (fst q) (snd q)
 
-instance (QA a,QA r) => Elim (Maybe a) r where
+instance (QA a,QA r, Default a) => Elim (Maybe a) r where
     type Eliminator (Maybe a) r = Q r -> (Q a -> Q r) -> Q r
     elim q r f = maybe r f q
 
@@ -364,10 +367,12 @@ instance IsString (Q Text) where
 -- * Referring to persistent tables
 
 defaultHints :: NonEmpty Key -> TableHints
-defaultHints keys = TableHints keys PossiblyEmpty
+defaultHints keys = TableHints keys PossiblyEmpty NoProvenance
 
-table :: (QA a, TA a) => String -> NonEmpty ColName -> TableHints -> Q [a]
-table name schema hints = Q (TableE (TableDB name schema hints))
+table :: (QA a, TA a, QA k, Typeable (Rep k))
+      => String -> NonEmpty ColName -> (Q a -> Q k) -> TableHints -> Q [a]
+table name schema keyProj hints =
+    Q (TableE (TableDB name schema hints) (toLam keyProj))
 
 -- * toQ
 
@@ -464,37 +469,45 @@ ifThenElse = cond
 
 -- * Maybe
 
-listToMaybe :: (QA a) => Q [a] -> Q (Maybe a)
-listToMaybe (Q as) = Q as
+maybeToPair :: (QA a, Default a) => Q (Maybe a) -> Q (Bool, a)
+maybeToPair (Q a) = Q a
 
-maybeToList :: (QA a) => Q (Maybe a) -> Q [a]
-maybeToList (Q ma) = Q ma
+pairToMaybe :: (QA a, Default a) => Q (Bool, a) -> Q (Maybe a)
+pairToMaybe (Q a) = Q a
 
-nothing :: (QA a) => Q (Maybe a)
-nothing = listToMaybe nil
+listToMaybe :: (QA a, Default a) => Q [a] -> Q (Maybe a)
+listToMaybe a = ifThenElse (null a) nothing (just (head a))
 
-just :: (QA a) => Q a -> Q (Maybe a)
-just a = listToMaybe (singleton a)
+maybeToList :: (QA a, Default a) => Q (Maybe a) -> Q [a]
+maybeToList ma = ifThenElse (fst p) (singleton (snd p)) nil
+    where
+      p = maybeToPair ma
 
-isNothing :: (QA a) => Q (Maybe a) -> Q Bool
+nothing :: forall a. (QA a, Default a) => Q (Maybe a)
+nothing = Q (TupleConstE (Tuple2E (BoolE False) (toExp (def :: a))))
+
+just :: (QA a, Default a) => Q a -> Q (Maybe a)
+just (Q a) = Q (TupleConstE (Tuple2E (BoolE True) a))
+
+isNothing :: (QA a, Default a) => Q (Maybe a) -> Q Bool
 isNothing ma = null (maybeToList ma)
 
-isJust :: (QA a) => Q (Maybe a) -> Q Bool
+isJust :: (QA a, Default a) => Q (Maybe a) -> Q Bool
 isJust ma = not (isNothing ma)
 
-fromJust :: (QA a) => Q (Maybe a) -> Q a
+fromJust :: (QA a, Default a) => Q (Maybe a) -> Q a
 fromJust ma = head (maybeToList ma)
 
-maybe :: (QA a,QA b) => Q b -> (Q a -> Q b) -> Q (Maybe a) -> Q b
+maybe :: (QA a, QA b, Default a) => Q b -> (Q a -> Q b) -> Q (Maybe a) -> Q b
 maybe b f ma = isNothing ma ? (b,f (fromJust ma))
 
-fromMaybe :: (QA a) => Q a -> Q (Maybe a) -> Q a
+fromMaybe :: (QA a, Default a) => Q a -> Q (Maybe a) -> Q a
 fromMaybe a ma = isNothing ma ? (a,fromJust ma)
 
-catMaybes :: (QA a) => Q [Maybe a] -> Q [a]
+catMaybes :: (QA a, Default a) => Q [Maybe a] -> Q [a]
 catMaybes = concatMap maybeToList
 
-mapMaybe :: (QA a,QA b) => (Q a -> Q (Maybe b)) -> Q [a] -> Q [b]
+mapMaybe :: (QA a, QA b, Default b) => (Q a -> Q (Maybe b)) -> Q [a] -> Q [b]
 mapMaybe f = concatMap (maybeToList . f)
 
 -- * Either
@@ -534,7 +547,7 @@ partitionEithers es = pair (lefts es) (rights es)
 -- * List Construction
 
 nil :: (QA a) => Q [a]
-nil = Q (ListE S.empty)
+nil = Q (ListE reifyTy S.empty)
 
 cons :: (QA a) => Q a -> Q [a] -> Q [a]
 cons (Q a) (Q as) = Q (AppE Cons (pairE a as))
@@ -585,7 +598,7 @@ drop :: (QA a) => Q Integer -> Q [a] -> Q [a]
 drop i xs = map fst $ filter (\xp -> snd xp > i) $ number xs
 
 map :: (QA a,QA b) => (Q a -> Q b) ->  Q [a] -> Q [b]
-map f (Q as) = Q (AppE Map (pairE (LamE (toLam f)) as))
+map f (Q as) = Q (AppE Map (pairE (LamE reifyTy (toLam f)) as))
 
 append :: (QA a) => Q [a] -> Q [a] -> Q [a]
 append (Q as) (Q bs) = Q (AppE Append (pairE as bs))
@@ -594,12 +607,12 @@ append (Q as) (Q bs) = Q (AppE Append (pairE as bs))
 (++) = append
 
 filter :: (QA a) => (Q a -> Q Bool) -> Q [a] -> Q [a]
-filter f (Q as) = Q (AppE Filter (pairE (LamE (toLam f)) as))
+filter f (Q as) = Q (AppE Filter (pairE (LamE reifyTy (toLam f)) as))
 
 -- | Partition a list into groups according to the supplied projection
 -- function.
 groupWithKey :: (QA a,QA b,Ord b, TA b) => (Q a -> Q b) -> Q [a] -> Q [(b,[a])]
-groupWithKey f (Q as) = Q (AppE GroupWithKey (pairE (LamE (toLam f)) as))
+groupWithKey f (Q as) = Q (AppE GroupWithKey (pairE (LamE reifyTy (toLam f)) as))
 
 groupWith :: (QA a,QA b,Ord b, TA b) => (Q a -> Q b) -> Q [a] -> Q [[a]]
 groupWith f as = map snd (groupWithKey f as)
@@ -616,7 +629,7 @@ groupAggr k p agg as =
 
 
 sortWith :: (QA a,QA b,Ord b, TA b) => (Q a -> Q b) -> Q [a] -> Q [a]
-sortWith f (Q as) = Q (AppE SortWith (pairE (LamE (toLam f)) as))
+sortWith f (Q as) = Q (AppE SortWith (pairE (LamE reifyTy (toLam f)) as))
 
 null :: (QA a) => Q [a] -> Q Bool
 null (Q as) = Q (AppE Null as)
@@ -660,7 +673,7 @@ concat :: (QA a) => Q [[a]] -> Q [a]
 concat (Q ass) = Q (AppE Concat ass)
 
 concatMap :: (QA a,QA b) => (Q a -> Q [b]) -> Q [a] -> Q [b]
-concatMap f (Q as) = Q (AppE ConcatMap (pairE (LamE (toLam f)) as))
+concatMap f (Q as) = Q (AppE ConcatMap (pairE (LamE reifyTy (toLam f)) as))
 
 maximum :: (QA a,Ord a,TA a) => Q [a] -> Q a
 maximum (Q as) = Q (AppE Maximum as)
@@ -705,7 +718,7 @@ elem a as = any (P.const $ toQ True) $ filter (== a) as
 notElem :: (QA a,Eq a,TA a) => Q a -> Q [a] -> Q Bool
 notElem a as = not (a `elem` as)
 
-lookup :: (QA a,QA b,Eq a,TA a) => Q a -> Q [(a, b)] -> Q (Maybe b)
+lookup :: (QA a,QA b,Eq a,TA a, Default b) => Q a -> Q [(a, b)] -> Q (Maybe b)
 lookup a  = listToMaybe . map snd . filter ((a ==) . fst)
 
 -- * Zipping and Unzipping Lists

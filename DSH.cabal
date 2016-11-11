@@ -94,9 +94,10 @@ Library
                      vector                       >= 0.10,
                      hashable                     >= 1.2,
                      unordered-containers         >= 0.2,
-                     megaparsec                   >= 5.0,
+                     megaparsec                   >= 5.0 && < 6.0,
                      scientific                   >= 0.3,
-                     algebra-dag                  >= 0.1.1
+                     algebra-dag                  >= 0.1.1,
+                     data-default                 >= 0.7.1.1
 
   Hs-source-dirs:    src
 
@@ -108,6 +109,7 @@ Library
   Exposed-modules:   Database.DSH
                      Database.DSH.Compiler
                      Database.DSH.Backend
+                     Database.DSH.Provenance
                      Database.DSH.Tests
                      Database.DSH.CL.Parser
                      Database.DSH.SL
@@ -130,10 +132,14 @@ Library
                      Database.DSH.Frontend.Builtins
                      Database.DSH.Execute.TH
                      Database.DSH.Execute
-
+                     Database.DSH.Common.CompileM
                      Database.DSH.Common.RewriteM
                      Database.DSH.Common.Kure
                      Database.DSH.Common.TH
+
+                     Database.DSH.Provenance.Where
+                     Database.DSH.Provenance.Where.Common
+                     Database.DSH.Provenance.Lineage
 
                      Database.DSH.CL.Lang
                      Database.DSH.CL.Typing

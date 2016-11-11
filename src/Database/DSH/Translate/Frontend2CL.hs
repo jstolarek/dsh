@@ -9,7 +9,7 @@ module Database.DSH.Translate.Frontend2CL
     ( toComprehensions
     ) where
 
-import           Control.Monad.State
+import           Data.List                        (findIndices)
 import           Data.List.NonEmpty               (NonEmpty((:|)))
 import qualified Data.List.NonEmpty               as N
 import qualified Data.Text                        as T
@@ -21,23 +21,11 @@ import qualified Database.DSH.CL.Lang             as CL
 import qualified Database.DSH.CL.Primitives       as CP
 import           Database.DSH.Common.Impossible
 import qualified Database.DSH.Common.Lang         as L
+import           Database.DSH.Common.CompileM
 import qualified Database.DSH.Common.Type         as Ty
 import           Database.DSH.Frontend.Builtins
 import           Database.DSH.Frontend.Internals
 import           Database.DSH.Frontend.TupleTypes
-
--- In the state, we store a counter for fresh variable names.
-type CompileState = Integer
-
--- | The Compile monad provides fresh variable names.
-type Compile = State CompileState
-
--- | Provide a fresh identifier name during compilation
-freshVar :: Compile Integer
-freshVar = do
-    i <- get
-    put $ i + 1
-    return i
 
 prefixVar :: Integer -> String
 prefixVar i = "v" ++ show i
@@ -59,16 +47,10 @@ toComprehensions q =
   where
     cl = runCompile (translate q)
 
--- | Execute the transformation computation. During compilation table
--- information can be retrieved from the database, therefore the result
--- is wrapped in the IO Monad.
-runCompile :: Compile a -> a
-runCompile ma = evalState ma 1
-
-lamBody :: forall a b.Reify a => (Exp a -> Exp b) -> Compile (L.Ident, Exp b)
+lamBody :: forall b. (Integer -> Exp b) -> Compile (L.Ident, Exp b)
 lamBody f = do
     v <- freshVar
-    return (prefixVar v, f (VarE v :: Exp a))
+    return (prefixVar v, f v)
 
 -- | Translate a frontend HOAS AST to a FOAS AST in Comprehension
 -- Language (CL).
@@ -85,25 +67,21 @@ translate (TextE t) = return $ CP.string t
 translate (DecimalE d) = return $ CP.decimal $ fromRational $ toRational d
 translate (ScientificE d) = return $ CP.decimal d
 translate (DayE d) = return $ CP.day $ L.Date d
-translate (VarE i) = do
-    let ty = reify (undefined :: a)
+translate (VarE ty i) = do
     return $ CP.var (translateType ty) (prefixVar i)
-translate (ListE es) = do
-    let ty = reify (undefined :: a)
-    CP.list (translateType ty) <$> mapM translate (toList es)
+translate (ListE ty es) = do
+    CP.list (translateType (ListT ty)) <$> mapM translate (toList es)
 -- We expect the query language to be first order. Lambdas must only
 -- occur as an argument to higher-order built-in combinators (map,
 -- concatMap, sortWith, ...). If lambdas occur in other places that
 -- have not been eliminated by inlining in the frontend, additional
 -- normalization rules or defunctionalization should be employed.
-translate (LamE _) = $impossible
-translate (TableE (TableDB tableName colNames hints)) = do
+translate (LamE _ _) = $impossible
+translate (TableE t _) =
     -- Reify the type of the table expression
-    let ty = reify (undefined :: a)
-    let colNames' = fmap L.ColName colNames
-    let bty = translateType ty
-
-    return $ CP.table bty tableName (schema tableName colNames' bty hints)
+    let ty  = reify (undefined :: a)
+        bty = translateType ty
+    in translateTable bty t
 
 translate (AppE f args) = translateApp f args
 
@@ -136,7 +114,6 @@ schema tableName cols ty hints =
     ne :: Emptiness -> L.Emptiness
     ne NonEmpty      = L.NonEmpty
     ne PossiblyEmpty = L.PossiblyEmpty
-
 
 translateApp3 :: (CL.Expr -> CL.Expr -> CL.Expr -> CL.Expr)
               -> Exp (a, b, c)
@@ -189,7 +166,7 @@ translateApp f args =
        -- Map to a comprehension
        Map          ->
            case args of
-               TupleConstE (Tuple2E (LamE lam) xs) -> do
+               TupleConstE (Tuple2E (LamE _ lam) xs) -> do
                    xs'                 <- translate xs
                    (boundVar, bodyExp) <- lamBody lam
                    bodyExp'            <- translate bodyExp
@@ -199,7 +176,7 @@ translateApp f args =
        -- Map to a comprehension and concat
        ConcatMap    ->
            case args of
-               TupleConstE (Tuple2E (LamE lam) xs) -> do
+               TupleConstE (Tuple2E (LamE _ lam) xs) -> do
                    xs'                 <- translate xs
                    (boundVar, bodyExp) <- lamBody lam
                    bodyExp'            <- translate bodyExp
@@ -210,7 +187,7 @@ translateApp f args =
        -- sortWith (\x -> f x) xs => sort [ (x, f x) | x <- xs ]
        SortWith     ->
            case args of
-               TupleConstE (Tuple2E (LamE lam) xs) -> do
+               TupleConstE (Tuple2E (LamE _ lam) xs) -> do
                    xs'                  <- translate xs
                    -- Get a FOAS representation of the lambda
                    (boundName, sortExp) <- lamBody lam
@@ -218,13 +195,14 @@ translateApp f args =
 
                    let boundVar = CL.Var (Ty.elemT $ Ty.typeOf xs') boundName
 
-                   return $ CP.sort $ CP.singleGenComp (CP.pair boundVar sortExp') boundName xs'
+                   return $ CP.sort $ CP.singleGenComp (CP.pair boundVar sortExp')
+                                                        boundName xs'
                _ -> $impossible
 
        -- Map to a comprehension with a guard
        Filter       ->
            case args of
-               TupleConstE (Tuple2E (LamE lam) xs) -> do
+               TupleConstE (Tuple2E (LamE _ lam) xs) -> do
                    xs'                 <- translate xs
                    (boundVar, bodyExp) <- lamBody lam
                    bodyExp'            <- translate bodyExp
@@ -237,14 +215,15 @@ translateApp f args =
        -- groupWithKey (\x -> f x) xs => group [ (x, f x) | x <- xs ]
        GroupWithKey ->
            case args of
-               TupleConstE (Tuple2E (LamE lam) xs) -> do
+               TupleConstE (Tuple2E (LamE _ lam) xs) -> do
                    xs'                   <- translate xs
                    (boundName, groupExp) <- lamBody lam
                    groupExp'             <- translate groupExp
 
                    let boundVar = CL.Var (Ty.elemT $ Ty.typeOf xs') boundName
 
-                   return $ CP.group $ CP.singleGenComp (CP.pair boundVar groupExp') boundName xs'
+                   return $ CP.group $ CP.singleGenComp (CP.pair boundVar groupExp')
+                                                         boundName xs'
 
                _ -> $impossible
 
@@ -300,3 +279,46 @@ translateApp f args =
            e' <- translate args
            let tupAcc = $(mkTupElemCompile 16) te
            return $ tupAcc e'
+
+translateTable :: Ty.Type -> Table -> Compile CL.Expr
+translateTable bty (TableDB tableName colNames hints) = do
+    let colNames' = fmap L.ColName colNames
+
+    -- if a table has where-provenance hint we need to run where-provenance
+    -- transformation
+    case provenanceHint hints of
+     WhereProvenance provColsHint -> do
+       v <- prefixVar `fmap` freshVar
+       let ty'   = Ty.discardWhereProvType bty
+           table = CP.table ty' tableName (schema tableName colNames' ty' hints)
+
+           -- Names of provenance columns.  Columns with no provenance
+           -- information are represented by Nothing
+           provCols :: [Maybe T.Text]
+           provCols = N.toList $ N.map (\c -> if c `elem` provColsHint
+                                              then Just (T.pack c)
+                                              else Nothing)
+                                       colNames
+
+           -- Find indices of columns that form a key (possibly just one
+           -- column).  If there is more than one key we just take the first one
+           -- assuming that keys should be equivalent.
+           keyIndices =
+               let keyColumnNames = N.toList . unKey . N.head . keysHint $ hints
+               in findIndices (\c -> c `elem` keyColumnNames)
+                              (N.toList colNames)
+
+           addWhereProv :: Int     -- ^ Tuple width
+                        -> CL.Expr -- ^ Comprehension binder
+                        -> T.Text
+                        -> [Maybe T.Text] -- length = tuple width
+                        -> [Int]   -- ^ Index of key column
+                        -> CL.Expr
+           addWhereProv = $(mkAddWhereProvenance 16)
+
+           body = addWhereProv (length colNames) (CL.Var (Ty.unliftType ty') v)
+                               (T.pack tableName) provCols keyIndices
+
+       return $ CP.singleGenComp body v table
+
+     _ -> return $ CP.table bty tableName (schema tableName colNames' bty hints)

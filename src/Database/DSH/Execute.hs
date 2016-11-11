@@ -37,7 +37,7 @@ type SegMap a = M.HashMap CompositeKey (F.Exp a)
 -- | Row layout with nesting data in the form of segment maps
 data SegLayout a where
     SCol   :: !(F.Type a) -> !ColName -> SegLayout a
-    SNest  :: F.Reify a => !(F.Type [a]) -> !(SegMap [a]) -> SegLayout [a]
+    SNest  :: !(F.Type a) -> !(F.Type [a]) -> !(SegMap [a]) -> SegLayout [a]
     STuple :: !(SegTuple a) -> SegLayout a
 
 --------------------------------------------------------------------------------
@@ -85,7 +85,8 @@ execQueryBundle !conn !shape !ty =
         (VShape q lyt, F.ListT ety) -> do
             slyt <- execNested conn' (columnIndexes (rvItemCols q) lyt) ety
             tab  <- execVector conn' q
-            return $! F.ListE (foldl' (vecIter (rvKeyCols q) slyt) S.empty tab)
+            return $! F.ListE ety
+                       (foldl' (vecIter (rvKeyCols q) slyt) S.empty tab)
         -- The query compiler supports only queries that return a list. If the
         -- frontend query returns a scalar value, the query result has been
         -- wrapped in a singleton list. We have to extract the scalar result
@@ -107,7 +108,7 @@ execNested !conn lyt ty =
         (CNest q clyt, F.ListT t)     -> do
             clyt' <- execNested conn clyt t
             tab   <- execVector conn q
-            return (SNest ty (mkSegMap (rvKeyCols q) (rvRefCols q) tab clyt'))
+            return (SNest t ty (mkSegMap t (rvKeyCols q) (rvRefCols q) tab clyt'))
         (CTuple lyts, F.TupleT tupTy) -> let execTuple = $(mkExecTuple 16)
                                          in execTuple lyts tupTy
         (_, _)                        ->
@@ -145,40 +146,42 @@ data SegAcc a = SegAcc
     }
 
 -- | Construct a segment map from a segmented vector
-mkSegMap :: (F.Reify a, Row r)
-         => [ColName]
+mkSegMap :: Row r
+         => F.Type a
+         -> [ColName]
          -> [ColName]
          -> [r]
          -> SegLayout a
          -> SegMap [a]
-mkSegMap !keyCols !refCols !tab !slyt =
+mkSegMap t !keyCols !refCols !tab !slyt =
     let -- FIXME using the empty list as the starting key is not exactly nice
         !initialAcc = SegAcc { saCurrSeg = CompositeKey []
                              , saSegMap  = M.empty
                              , saCurrVec = S.empty
                              }
-        !finalAcc = foldl' (segIter keyCols refCols slyt) initialAcc tab
+        !finalAcc = foldl' (segIter t keyCols refCols slyt) initialAcc tab
     in M.insert (saCurrSeg finalAcc)
-                (F.ListE $ saCurrVec finalAcc)
+                (F.ListE t $ saCurrVec finalAcc)
                 (saSegMap finalAcc)
 
 -- | Fold iterator that constructs a map from segment descriptor to
 -- the list value that is represented by that segment
-segIter :: (F.Reify a, Row r)
-        => [ColName]
+segIter :: Row r
+        => F.Type a
+        -> [ColName]
         -> [ColName]
         -> SegLayout a
         -> SegAcc a
         -> r
         -> SegAcc a
-segIter !keyCols !refCols !lyt !acc !row =
+segIter ty !keyCols !refCols !lyt !acc !row =
     let !val = constructVal keyCols lyt row
         !ref = mkCKey row refCols
     in if ref == saCurrSeg acc
        then acc { saCurrVec = saCurrVec acc S.|> val }
        else acc { saCurrSeg = ref
                 , saSegMap  = M.insert (saCurrSeg acc)
-                                       (F.ListE $ saCurrVec acc)
+                                       (F.ListE ty $ saCurrVec acc)
                                        (saSegMap acc)
                 , saCurrVec = S.singleton val
                 }
@@ -194,9 +197,9 @@ constructVal :: Row r => [ColName] -> SegLayout a -> r -> F.Exp a
 constructVal !keyCols !lyt !row =
     case lyt of
         STuple !stup         -> constructTuple keyCols stup row
-        SNest _ !segMap      -> case M.lookup (mkCKey row keyCols) segMap of
+        SNest ty _ !segMap   -> case M.lookup (mkCKey row keyCols) segMap of
                                      Just !v -> v
-                                     Nothing -> F.ListE S.empty
+                                     Nothing -> F.ListE ty S.empty
         SCol F.DoubleT c     -> F.DoubleE $ doubleVal $ col c row
         SCol F.IntegerT c    -> F.IntegerE $ integerVal $ col c row
         SCol F.BoolT c       -> F.BoolE $ boolVal $ col c row
