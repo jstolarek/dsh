@@ -10,9 +10,9 @@ module Database.DSH.Frontend.TH
     , generateTableSelectors
     -- FIXME don't expose tuple constructors but use qualified names
     , DSH.TupleConst(..)
-    , F.TupElem(..)
+    , DSH.TupElem(..)
     , DSH.Exp(..)
-    , F.Fun(..)
+    , DSH.Fun(..)
     ) where
 
 import           Control.Monad
@@ -24,9 +24,10 @@ import           Language.Haskell.TH.Syntax
 
 import qualified Database.DSH.Frontend.Internals  as DSH
 import           Database.DSH.Frontend.TupleTypes
-import qualified Database.DSH.Frontend.Builtins   as F
 import           Database.DSH.Common.Impossible
 import           Database.DSH.Common.TH
+
+import           Database.DSH.Provenance.Where.Common
 
 
 -----------------------------------------
@@ -363,9 +364,9 @@ deriveSmartConstructors name = do
   info <- reify name
   case info of
     TyConI (DataD    _cxt typConName tyVarBndrs _ cons _names) -> do
-      decss <- zipWithM (deriveSmartConstructor typConName tyVarBndrs (length cons))
-                        [0 .. ]
-                        cons
+      decss <- do
+          zipWithM (deriveSmartConstructor typConName tyVarBndrs (length cons))
+                   [0 .. ] cons
       return (concat decss)
     TyConI (NewtypeD _cxt typConName tyVarBndrs _ con  _names) ->
       deriveSmartConstructor typConName tyVarBndrs 1 0 con
@@ -373,35 +374,85 @@ deriveSmartConstructors name = do
 
 deriveSmartConstructor :: Name -> [TyVarBndr] -> Int -> Int -> Con -> Q [Dec]
 deriveSmartConstructor typConName tyVarBndrs n i con = do
-  let smartConName = toSmartConName (conToName con)
+  let conArgTypes = conToTypes con
 
-  let boundTyps = map (VarT . tyVarBndrToName) tyVarBndrs
+  -- A list of Bools that says which constructor fields have where-provenance
+  -- annotation
+  provAnnotMap <- mapM hasWhereProvenanceAnnotation conArgTypes
 
-  let resTyp = AppT (ConT ''DSH.Q) (foldl AppT (ConT typConName) boundTyps)
+  let -- if there's at least one field with a where-provenance annotation return
+      -- the list pass in as argument, otherwise return empty list
+      whenProv xs = if or provAnnotMap then [xs] else []
 
-  let smartConContext = map (nameTyApp ''DSH.QA) boundTyps
+      -- zip a list with provenance annotation map using zipping function f
+      zipProv f = zipWith f provAnnotMap
 
-  let smartConTyp = foldr (AppT . AppT ArrowT . AppT (ConT ''DSH.Q))
-                          resTyp
-                          (conToTypes con)
+      -- smart constructor names
+      smartConNames =
+        let smartConName = toSmartConName (conToName con)
+        in  whenProv (toSmartConProvName smartConName) ++ [smartConName]
 
-  let smartConDec = SigD smartConName (ForallT tyVarBndrs smartConContext smartConTyp)
+      boundTyps = map (VarT . tyVarBndrToName) tyVarBndrs
+
+      -- return type of a smart constructor
+      resTyp = AppT (ConT ''DSH.Q) (foldl AppT (ConT typConName) boundTyps)
+
+      smartConContext = map (nameTyApp ''DSH.QA) boundTyps
+
+      -- builds smart constructor arrow type using a supplied list of
+      -- constructor argument types
+      buildSmartConTy tys = foldr (AppT . AppT ArrowT . AppT (ConT ''DSH.Q))
+                                  resTyp tys
+
+      -- if a given field has provenance annotation we must apply ProvData type
+      -- family to that argument's type
+      conArgProvTypes =
+          zipProv (\prov ty -> if prov then AppT (ConT ''ProvData) ty else ty)
+                  conArgTypes
+
+      -- final types of smart constructors
+      smartConTys = map buildSmartConTy (conArgTypes : whenProv conArgProvTypes)
+
+      -- smart constructor type annotations
+      smartConDecs =
+         zipWith (\name ty -> SigD name (ForallT tyVarBndrs smartConContext ty))
+                 smartConNames smartConTys
 
   ns <- mapM (\_ -> newName "e") (conToTypes con)
-  let es = map VarE ns
 
-  let smartConPat = map (ConP 'DSH.Q . return . VarP) ns
+  let -- expressions used to construct body of a smart constructor with
+      -- provenance.  Each expression corresponding to a field must be extended
+      -- with empty provenance annottation.  Type annotation is required to
+      -- eliminate type ambiguity.
+      esProv = zipProv (\prov (name, ty) ->
+                     if prov
+                     then AppE (VarE (mkName "unQ"))
+                               (SigE (AppE (VarE (mkName "emptyProvQ"))
+                                           (VarE name))
+                                     (AppT (ConT ''DSH.Q) ty))
+                     else VarE name) (zip ns conArgTypes)
+
+  let es = map VarE ns : whenProv esProv
+
+  let -- fields without where provenance are unwrapped from Q
+      smartConPats = map (ConP 'DSH.Q . return . VarP) ns :
+        whenProv (zipProv (\prov pat -> if prov
+                                        then (VarP pat)
+                                        else (ConP 'DSH.Q (return (VarP pat))))
+                          ns)
 
   -- FIXME PairE -> TupleE
-  smartConExp <- if null es
-                 then return $ ConE 'DSH.UnitE
-                 else mkTupConstTerm es
-  smartConBody <- deriveSmartConBody n i smartConExp
-  let smartConClause = Clause smartConPat (NormalB smartConBody) []
+  smartConExps <- mapM (\e -> if null e
+                              then return $ ConE 'DSH.UnitE
+                              else mkTupConstTerm e) es
 
-  let funDec = FunD smartConName [smartConClause]
+  smartConBodies <- mapM (deriveSmartConBody n i) smartConExps
+  let smartConClauses = zipWith (\pat body -> [Clause pat (NormalB body) []])
+                                smartConPats smartConBodies
 
-  return [smartConDec,funDec]
+  let funDecs = zipWith FunD smartConNames smartConClauses
+
+  return $ concat (transpose [ smartConDecs, funDecs ])
 
 deriveSmartConBody :: Int -- Total number of constructors
                    -> Int -- Index of the constructor
@@ -426,6 +477,10 @@ toSmartConName name1 = case nameBase name1 of
   c : cs | isAlpha c  -> mkName (toLower c : cs)
   cs                  -> mkName (':' : cs)
 
+toSmartConProvName :: Name -> Name
+toSmartConProvName name = mkName ((nameBase name) ++ "Prov")
+
+
 ----------------------------------------
 -- Generating lifted record selectors --
 ----------------------------------------
@@ -434,16 +489,24 @@ toSmartConName name1 = case nameBase name1 of
 
 For a record declaration like
 
-data R = R { a :: Integer, b :: Text }
+data R = R { a :: Integer, b :: Text, c :: WhereProv Bool Integer }
 
 we generate the following lifted selectors:
 
 aQ :: Q R -> Q Integer
-aQ (view -> (a, _)) = a
+aQ (view -> (a, _, _)) = a
 
 bQ :: Q R -> Q Text
-bQ (view -> (_, b)) = b
+bQ (view -> (_, b, _)) = b
 
+cQ :: Q R -> Q (WhereProv Bool Integer)
+cQ (view -> (_, _, c)) = c
+
+c_dataQ :: Q R -> Q (ProvData (WhereProv Bool Integer))
+c_dataQ (view -> (_, _, c)) = dataQ c
+
+c_provQ :: Q R -> Q (ProvAnnot (WhereProv Bool Integer))
+c_prvQ (view -> (_, _, c)) = provQ c
 -}
 
 -- | Create lifted record selectors
@@ -458,7 +521,7 @@ generateTableSelectors name = do
     _ -> fail errMsgBaseRecCons
 
 generateTableSelector :: Name -> [Name] -> VarStrictType -> Q [Dec]
-generateTableSelector typeName allFieldNames (fieldName, _strict, typ) = do
+generateTableSelector typeName allFieldNames vst@(fieldName, _strict, typ) = do
   let selName = case fieldName of
                   Name (OccName n) _ -> mkName $ n ++ "Q"
 
@@ -478,11 +541,42 @@ generateTableSelector typeName allFieldNames (fieldName, _strict, typ) = do
 
       funDec   = FunD selName [Clause [argPat] bodyExp []]
 
+  hasProv  <- hasWhereProvenanceAnnotation typ
+  provDecs <- if hasProv
+              then generateProvenanceTableSelectors typeName allFieldNames vst
+              else return []
 
-  return [sigDec, funDec]
+  return $ [sigDec, funDec] ++ provDecs
+
+generateProvenanceTableSelectors :: Name -> [Name] -> VarStrictType -> Q [Dec]
+generateProvenanceTableSelectors typeName allFieldNames (fieldName, _, ty) = do
+  let selNames = case fieldName of
+                   Name (OccName n) _ -> [ mkName $ n ++ "_dataQ"
+                                         , mkName $ n ++ "_provQ" ]
+
+  let mkSelType t = AppT (AppT ArrowT (AppT (ConT ''DSH.Q) (ConT typeName)))
+                         (AppT (ConT ''DSH.Q) t)
+      selTypes = [ mkSelType (AppT (ConT ''ProvData ) ty)
+                 , mkSelType (AppT (ConT ''ProvAnnot) ty) ]
+      sigDecs  = zipWith SigD selNames selTypes
+
+  fieldVarName <- newName "x"
+  let projectField f | f == fieldName = VarP fieldVarName
+      projectField _                  = WildP
+
+      tupPat   = map projectField allFieldNames
+
+      argPat   = ViewP (VarE 'DSH.view) (TupP tupPat)
+
+      bodyExps = [ NormalB $ AppE (VarE (mkName "dataQ")) (VarE fieldVarName)
+                 , NormalB $ AppE (VarE (mkName "provQ")) (VarE fieldVarName) ]
+
+      funDecs  = zipWith (\sel body -> FunD sel [Clause [argPat] body []])
+                         selNames bodyExps
+
+  return $ concat (transpose ([sigDecs, funDecs]))
 
 -- Helper Functions
-
 
 -- | From a list of operand patterns, construct a DSH tuple term
 -- pattern.
@@ -542,6 +636,35 @@ countConstructors name = do
     TyConI (DataD    _ _ _ _ cons _)  -> return (length cons)
     TyConI (NewtypeD {})              -> return 1
     _ -> fail errMsgExoticType
+
+-- Returns name of top-most type constructor
+tyConName :: Type -> Maybe Name
+tyConName (ConT n  ) = Just n
+tyConName (AppT t _) = tyConName t
+tyConName (SigT t _) = tyConName t
+tyConName _          = Nothing
+
+-- Looks through a type synonym
+lookThrough :: Name -> Q (Maybe Type)
+lookThrough name = do
+  info <- reify name
+  case info of
+    TyConI (TySynD _ _ ty) -> return (Just ty)
+    _                      -> return Nothing
+
+-- Returns true if the type is a WhereProv (possibly behind a type synonym)
+hasWhereProvenanceAnnotation :: Type -> Q Bool
+hasWhereProvenanceAnnotation ty =
+    case tyConName ty of
+      Nothing   -> return False
+      Just name ->
+          if name == ''WhereProv
+          then return True
+          else do
+            ty' <- lookThrough name
+            case ty' of
+              Nothing   -> return False
+              Just ty'' -> hasWhereProvenanceAnnotation ty''
 
 -- Error messages
 

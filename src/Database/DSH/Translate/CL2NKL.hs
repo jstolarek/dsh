@@ -280,6 +280,7 @@ desugarQualsRec env baseSrc []                    = return (env, baseSrc)
 
 -- | Kick off the recursive traversal of the qualifier list.
 desugarQuals :: [CL.Qual] -> NameEnv (GenEnv, NKL.Expr, NKL.Expr -> NKL.Expr)
+-- see DSH issue #8
 desugarQuals []                   = $impossible
 -- If the first qualifier is a guard, employ an if with a [] else
 -- branch.

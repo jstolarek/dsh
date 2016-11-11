@@ -14,8 +14,9 @@
 
 module Database.DSH
     ( module Database.DSH.Frontend.Externals
-    , Q, QA, TA, Elim, elim, View, view, Key(..), TableHints(..), Emptiness(..)
+    , module Database.DSH.Frontend.Internals
     , module Database.DSH.Frontend.TH
+    , module Data.Proxy
     , module Data.String
     , module Data.Text
     , module Data.Decimal
@@ -24,9 +25,12 @@ module Database.DSH
     ) where
 
 import Database.DSH.Frontend.Externals
-import Database.DSH.Frontend.Internals (Q,QA,TA,Elim,elim,View,view,Key(..),TableHints(..), Emptiness(..))
+import Database.DSH.Frontend.Internals
+    ( Q, unQ, QA, TA, Elim, elim, View, view, Key(..), TableHints(..)
+    , Emptiness(..), Provenance(..) )
 import Database.DSH.Frontend.TH
 
+import Data.Proxy (Proxy)
 import Data.String (IsString,fromString)
 import Data.Text (Text)
 import Data.Decimal (Decimal)

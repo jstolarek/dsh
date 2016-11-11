@@ -15,6 +15,8 @@ module Database.DSH.Frontend.TupleTypes
     , mkTranslateType
     , mkViewInstances
     , mkTupleAstComponents
+    , mkSubstTuple
+    , mkAddWhereProvenance
     -- * Helper functions
     , innerConst
     , outerConst
@@ -25,6 +27,8 @@ module Database.DSH.Frontend.TupleTypes
     ) where
 
 import           Data.List
+import           Data.Proxy
+import           Data.Text   (Text)
 import           Text.Printf
 
 import           Language.Haskell.TH
@@ -301,7 +305,7 @@ mkTupleAccessor width idx = do
 --
 -- @
 -- tup<n>_<i> :: (QA t1, ..., QA t_n) => Q (t_1, ..., t_n) -> Q t_i
--- tup<n>_<i> (Q e) = Q (AppE (TupElem Tup<n>_<i>) e)
+-- tup<n>_<i> (Q e) = Q (AppE Proxy (TupElem Tup<n>_<i>) e)
 -- @
 mkTupleAccessors :: Int -> Q [Dec]
 mkTupleAccessors maxWidth = concat <$> sequence [ mkTupleAccessor width idx
@@ -506,7 +510,136 @@ mkAstTupleType maxWidth =
 mkTupleAstComponents :: Int -> Q [Dec]
 mkTupleAstComponents maxWidth = (++) <$> mkAstTupleConst maxWidth <*> mkAstTupleType maxWidth
 
+------------------------------------------------------------
+-- Substitution into tuples
+------------------------------------------------------------
 
+-- Generate substitution lambda that traverses tuples and calls `subst` on
+-- every subcomponent of a tuple. Names of x and v are be passed by the caller
+--
+-- (\tuple -> case tuple of
+--      Tuple2E e1 e2    -> Tuple2E (subst x v e2) (subst x v e2)
+--      ...
+--      TupleNE e1 .. eN -> TupleNE (subst x v e1) .. (subst x v eN)
+
+mkSubstTuple :: Name -> Name -> Int -> Q Exp
+mkSubstTuple x v maxWidth = do
+    lamArgName <- newName "tuple"
+    matches <- mapM (mkSubstTupleMatch x v) [2..maxWidth]
+    let lamBody = CaseE (VarE lamArgName) matches
+    return $ LamE [VarP lamArgName] lamBody
+
+mkSubstTupleMatch :: Name -> Name -> Int -> Q Match
+mkSubstTupleMatch x v width = do
+  let names    = map (\c -> mkName [c]) $ take width ['a' .. 'z']
+      tupConst = innerConst "" width
+      tuplePat = ConP tupConst (map VarP names)
+      substs   =
+         map (\e -> AppE (AppE (AppE (VarE (mkName "subst")) (VarE x)) (VarE v))
+                         (VarE e)) names
+      rhs      = foldl' AppE (ConE tupConst) substs
+  return $ Match tuplePat (NormalB rhs) []
+
+------------------------------------------------------------
+-- Where-provenance transformation for table declarations --
+------------------------------------------------------------
+
+-- These functions don't exactly belong here because, conceptually, they deal
+-- with where-provenance.  However, where-provenance implementation relies
+-- heavily on tuples and so this module seemed like a natural place for these
+-- functions - all the required imports are already here.
+
+-- Generate function that adds where-provenance annotations to a table row:
+--
+-- \rowWidth row tableName provColumns keyIndices ->
+--   let addProvToColumn = (see letDecs quotation below)
+--   in case lamRowWidth of
+--       2 -> (see mkWhereProvenanceMatch)
+--       ...
+
+mkAddWhereProvenance :: Integer -> Q Exp
+mkAddWhereProvenance maxWidth = do
+    lamRowWidth <- newName "rowWidth"
+    lamRow      <- newName "row"
+    lamTable    <- newName "tableName"
+    lamProvCols <- newName "provColumns"
+    lamKeyInd   <- newName "keyIndices"
+    matches     <- mapM (mkWhereProvenanceMatch lamRow lamProvCols lamKeyInd)
+                        [2..maxWidth]
+    widthError  <- [| error "Incorrect tuple width" |]
+
+    letDecs <-
+          [d| addProvToColumn :: CL.Expr -> CL.Expr -> Maybe Text -> CL.Expr
+              addProvToColumn _   col Nothing        = col
+              addProvToColumn key col (Just colName) =
+                CP.tuple [col, CP.just $ CP.tuple [ CP.string $(varE lamTable)
+                                                  , CP.string colName, key]]
+
+              buildKey :: [CL.Expr] -> [Int] -> CL.Expr
+              buildKey tupleElems keyIndices =
+                  case length keyIndices of
+                    1 -> tupleElems !! (keyIndices !! 0)
+                    _ -> let keyElems = foldr (\i a -> tupleElems !! i : a)
+                                              [] keyIndices
+                         in CP.tuple keyElems
+             |]
+
+    let errorMatch = Match WildP (NormalB widthError) []
+        lamBody = LetE letDecs (CaseE (VarE lamRowWidth)
+                                      (matches ++ [errorMatch]))
+    return $ LamE [ VarP lamRowWidth, VarP lamRow    , VarP lamTable
+                  , VarP lamProvCols, VarP lamKeyInd ] lamBody
+
+-- let tupElem1 = CP.tupElem (intIndex 1) row
+--     (...)
+--     tupElemN = CP.tupElem (intIndex N) row
+--     tupElems = [ tupElem1, ..., tupElemN ]
+--     key      = buildKey tupElems keyIndices
+--     cols     = zipWith (addProvToColumn key) tupElems
+--                provColsNumbered
+-- in CP.tuple cols
+mkWhereProvenanceMatch :: Name -> Name -> Name -> Integer -> Q Match
+mkWhereProvenanceMatch row provColumns keyIndices width = do
+  let tupElemName :: Integer -> Name
+      tupElemName n = mkName $ "tupElem" ++ show n
+
+      tupElemsName, keyName, colsName :: Name
+      tupElemsName = mkName "tupElems"
+      keyName      = mkName "key"
+      colsName     = mkName "cols"
+
+      -- tupElemN = CP.tupElem (intIndex N) row
+      tupElem :: Integer -> Q Dec
+      tupElem elemIdx = do
+        let idxLit = litE $ IntegerL elemIdx
+        decBody <- [| CP.tupElem (intIndex $idxLit) $(varE row) |]
+        return $ ValD (VarP $ tupElemName elemIdx) (NormalB $ decBody) []
+
+  tupElemDecs <- mapM tupElem [1..width]
+
+  -- tupElems = [ tupElem1, ..., tupElemN ]
+  tupElemsE <- mapM (varE . tupElemName) [1..width]
+  let tupElemsDec = ValD (VarP tupElemsName) (NormalB $ ListE tupElemsE) []
+
+  -- key = buildKey tupElems keyIndices
+  keyBody <- [| $(varE $ mkName "buildKey") $(varE tupElemsName)
+                $(varE keyIndices) |]
+  let keyDec = ValD (VarP keyName) (NormalB keyBody) []
+
+  -- cols = zipWith (addProvToColumn key) tupElems
+  --                provColsNumbered
+  colsBody <- [| zipWith ($(varE $ mkName "addProvToColumn")
+                          $(varE keyName))
+                         $(varE tupElemsName) $(varE provColumns) |]
+  let colsDec = ValD (VarP colsName) (NormalB colsBody) []
+
+  -- CP.tuple cols
+  letBody <- [| CP.tuple $(varE colsName) |]
+
+  -- width -> let ... in [letBody]
+  return $ Match (LitP $ IntegerL width)
+                 (NormalB (LetE (tupElemDecs ++ [tupElemsDec, keyDec, colsDec])
+                          letBody)) []
 
 --------------------------------------------------------------------------------
 -- Helper functions
@@ -550,7 +683,9 @@ qName = mkName "Q"
 mkTupElemTerm :: Int -> Int -> Exp -> Q Exp
 mkTupElemTerm width idx arg = do
     let ta = ConE $ tupAccName width idx
-    return $ AppE (AppE (ConE $ mkName "AppE") (AppE (ConE $ mkName "TupElem") ta)) arg
+    return $ AppE (AppE (AppE (ConE $ mkName "AppE")
+                              (ConE 'Proxy))
+                        (AppE (ConE $ mkName "TupElem") ta)) arg
 
 -- | From a list of operand terms, construct a DSH tuple term.
 mkTupConstTerm :: [Exp] -> Q Exp

@@ -14,6 +14,8 @@ module Database.DSH.Common.Type
     , tupleElemTypes
     , fstT
     , sndT
+    , discardWhereProvType
+    , discardLineageType
     , listDepth
     , extractShape
     , unliftTypeN
@@ -32,8 +34,6 @@ module Database.DSH.Common.Type
     , pattern PPairT
     , Typed (..)
     ) where
-
-import Debug.Trace
 
 import Data.Aeson.TH
 
@@ -85,9 +85,24 @@ isNum (ScalarT StringT)     = False
 isNum (ScalarT UnitT)       = False
 isNum (ScalarT DateT)       = False
 
-scalarType :: Type -> Maybe ScalarType
-scalarType (ScalarT t) = Just t
-scalarType _           = Nothing
+discardWhereProvType :: Type -> Type
+-- Captures where-provenance annotation
+discardWhereProvType (TupleT [ ScalarT t
+                             , TupleT [ ScalarT BoolT
+                                      , TupleT [ ScalarT StringT
+                                               , ScalarT StringT
+                                               , _ ]]]) = ScalarT t
+discardWhereProvType (ScalarT t) = ScalarT t
+discardWhereProvType (ListT   t) = ListT (discardWhereProvType t)
+discardWhereProvType (TupleT  t) = TupleT $ map discardWhereProvType t
+
+discardLineageType :: Type -> Type
+-- Captures Lineage annotation
+discardLineageType (ListT (TupleT [ ty@(TupleT _)
+                                  , ListT (TupleT [ ScalarT StringT
+                                                  , _ ])])) = ListT ty
+-- Lineage type should be at the top level, so no recursion
+discardLineageType ty = ty
 
 --------------------------------------------------------------------------------
 -- Smart constructors and deconstructors for regular types
@@ -122,7 +137,7 @@ isList _         = False
 
 elemT :: Type -> Type
 elemT (ListT t) = t
-elemT _        = error "elemT: argument is not a list type"
+elemT _         = error "elemT: argument is not a list type"
 
 tupleElemT :: Type -> TupleIndex -> Type
 tupleElemT (TupleT ts) f =
@@ -134,11 +149,15 @@ tupleElemT _           _ = $impossible
 
 tupleElemTypes :: Type -> [Type]
 tupleElemTypes (TupleT ts) = ts
-tupleElemTypes t           = trace (show t) $ $impossible
+tupleElemTypes _           = $impossible
 
 listDepth :: Type -> Int
 listDepth (ListT t1) = 1 + listDepth t1
 listDepth _          = 0
+
+scalarType :: Type -> Maybe ScalarType
+scalarType (ScalarT t) = Just t
+scalarType _           = Nothing
 
 fstT :: Type -> Type
 fstT (TupleT [t1, _]) = t1

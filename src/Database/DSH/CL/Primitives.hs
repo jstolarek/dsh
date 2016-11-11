@@ -235,6 +235,9 @@ list t []       = nil t
 cons :: Expr -> Expr -> Expr
 cons e1 e2 = append (sng e1) e2
 
+just :: Expr -> Expr
+just a = tuple [bool P.True, a]
+
 ---------------------------------------------------------------------------------------
 -- Smart constructors for scalar unary operators
 
@@ -371,4 +374,3 @@ disj = scalarBinOp (L.SBBoolOp L.Disj)
 
 like :: Expr -> Expr -> Expr
 like = scalarBinOp (L.SBStringOp L.Like)
-

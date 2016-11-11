@@ -1,9 +1,11 @@
+{-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE GADTs                 #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TemplateHaskell       #-}
 {-# LANGUAGE TypeFamilies          #-}
 {-# LANGUAGE ViewPatterns          #-}
+{-# LANGUAGE ScopedTypeVariables   #-}
 
 {-# OPTIONS_GHC -Wno-redundant-constraints #-}
 
@@ -18,20 +20,21 @@ import           Prelude                          (Bool (..), Char, Double,
 import qualified Prelude                          as P
 
 import           Data.Decimal
+import           Data.Default
 import           Data.List.NonEmpty               (NonEmpty)
+import           Data.Proxy
 import           Data.Scientific
 import qualified Data.Sequence                    as S
 import           Data.String
 import           Data.Text                        (Text)
 import qualified Data.Text                        as T
 import           Data.Time.Calendar               (Day)
+import           Data.Typeable
 import           GHC.Exts                         (fromList, toList)
 
 import           Database.DSH.Common.Impossible
-import           Database.DSH.Frontend.Builtins
 import           Database.DSH.Frontend.Internals
 import           Database.DSH.Frontend.TupleTypes
-
 
 -- QA Instances
 
@@ -95,19 +98,17 @@ instance (QA a) => QA [a] where
     frExp (ListE as) = toList $ P.fmap frExp as
     frExp _ = $impossible
 
-instance (QA a) => QA (Maybe a) where
-    type Rep (Maybe a) = [Rep a]
-    toExp Nothing = ListE S.empty
-    toExp (Just a) = ListE (S.singleton $ toExp a)
-    frExp (ListE s) =
-        case S.viewl s of
-            S.EmptyL -> Nothing
-            a S.:< _ -> Just (frExp a)
+instance (QA a, Default a) => QA (Maybe a) where
+    type Rep (Maybe a) = (Rep Bool, Rep a)
+    toExp Nothing  = pairE (BoolE False) (toExp (def :: a))
+    toExp (Just a) = pairE (BoolE True ) (toExp a)
+    frExp (TupleConstE (Tuple2E (BoolE True ) a)) = Just (frExp a)
+    frExp (TupleConstE (Tuple2E (BoolE False) _)) = Nothing
     frExp _ = $impossible
 
 instance (QA a,QA b) => QA (Either a b) where
     type Rep (Either a b) = ([Rep a],[Rep b])
-    toExp (Left a) = pairE (ListE (S.singleton $ toExp a)) (ListE S.empty)
+    toExp (Left a)  = pairE (ListE (S.singleton $ toExp a)) (ListE S.empty)
     toExp (Right b) = pairE (ListE S.empty) (ListE $ S.singleton $ toExp b)
     frExp (TupleConstE (Tuple2E (ListE s1) (ListE s2))) =
         case (S.viewl s1, S.viewl s2) of
@@ -124,7 +125,7 @@ instance (QA r) => Elim () r where
 
 instance (QA r) => Elim Bool r where
     type Eliminator Bool r = Q r -> Q r -> Q r
-    elim (Q e) (Q e1) (Q e2) = Q (AppE Cond (TupleConstE (Tuple3E e e1 e2)))
+    elim (Q e) (Q e1) (Q e2) = Q (AppE Proxy Cond (TupleConstE (Tuple3E e e1 e2)))
 
 instance (QA r) => Elim Char r where
     type Eliminator Char r = (Q Char -> Q r) -> Q r
@@ -146,7 +147,7 @@ instance (QA a,QA b,QA r) => Elim (a,b) r where
     type Eliminator (a,b) r = (Q a -> Q b -> Q r) -> Q r
     elim q f = f (fst q) (snd q)
 
-instance (QA a,QA r) => Elim (Maybe a) r where
+instance (QA a,QA r, Default a) => Elim (Maybe a) r where
     type Eliminator (Maybe a) r = Q r -> (Q a -> Q r) -> Q r
     elim q r f = maybe r f q
 
@@ -181,75 +182,75 @@ instance TA Day where
 -- Numerical instances
 
 instance Num (Exp Integer) where
-    (+) e1 e2 = AppE Add (pairE e1 e2)
-    (*) e1 e2 = AppE Mul (pairE e1 e2)
-    (-) e1 e2 = AppE Sub (pairE e1 e2)
+    (+) e1 e2 = AppE Proxy Add (pairE e1 e2)
+    (*) e1 e2 = AppE Proxy Mul (pairE e1 e2)
+    (-) e1 e2 = AppE Proxy Sub (pairE e1 e2)
 
     fromInteger = IntegerE
 
-    abs e = let c = AppE Lt (pairE e 0)
-            in AppE Cond (tripleE c (negate e) e)
+    abs e = let c = AppE Proxy Lt (pairE e 0)
+            in AppE Proxy Cond (tripleE c (negate e) e)
 
-    signum e = let c1 = AppE Lt  (pairE e 0)
-                   c2 = AppE Equ (pairE e 0)
-                   e' = AppE Cond (tripleE c2 0 1)
-               in AppE Cond (tripleE c1 (-1) e')
+    signum e = let c1 = AppE Proxy Lt  (pairE e 0)
+                   c2 = AppE Proxy Equ (pairE e 0)
+                   e' = AppE Proxy Cond (tripleE c2 0 1)
+               in AppE Proxy Cond (tripleE c1 (-1) e')
 
 instance Num (Exp Double) where
-    (+) e1 e2 = AppE Add (pairE e1 e2)
-    (*) e1 e2 = AppE Mul (pairE e1 e2)
-    (-) e1 e2 = AppE Sub (pairE e1 e2)
+    (+) e1 e2 = AppE Proxy Add (pairE e1 e2)
+    (*) e1 e2 = AppE Proxy Mul (pairE e1 e2)
+    (-) e1 e2 = AppE Proxy Sub (pairE e1 e2)
 
     fromInteger = DoubleE . fromInteger
 
-    abs e = let c = AppE Lt (pairE e 0)
-            in  AppE Cond (tripleE c (negate e) e)
+    abs e = let c = AppE Proxy Lt (pairE e 0)
+            in  AppE Proxy Cond (tripleE c (negate e) e)
 
-    signum e = let c1 = AppE Lt  (pairE e 0.0)
-                   c2 = AppE Equ (pairE e 0.0)
-                   e' = AppE Cond (tripleE c2 0 1)
-               in  AppE Cond (tripleE c1 (-1) e')
+    signum e = let c1 = AppE Proxy Lt  (pairE e 0.0)
+                   c2 = AppE Proxy Equ (pairE e 0.0)
+                   e' = AppE Proxy Cond (tripleE c2 0 1)
+               in  AppE Proxy Cond (tripleE c1 (-1) e')
 
 instance Num (Exp Decimal) where
-    (+) e1 e2 = AppE Add (pairE e1 e2)
-    (*) e1 e2 = AppE Mul (pairE e1 e2)
-    (-) e1 e2 = AppE Sub (pairE e1 e2)
+    (+) e1 e2 = AppE Proxy Add (pairE e1 e2)
+    (*) e1 e2 = AppE Proxy Mul (pairE e1 e2)
+    (-) e1 e2 = AppE Proxy Sub (pairE e1 e2)
 
     fromInteger = DecimalE . fromInteger
 
-    abs e = let c = AppE Lt (pairE e 0)
-            in  AppE Cond (tripleE c (negate e) e)
+    abs e = let c = AppE Proxy Lt (pairE e 0)
+            in  AppE Proxy Cond (tripleE c (negate e) e)
 
-    signum e = let c1 = AppE Lt  (pairE e 0)
-                   c2 = AppE Equ (pairE e 0)
-                   e' = AppE Cond (tripleE c2 0 1)
-               in  AppE Cond (tripleE c1 (-1) e')
+    signum e = let c1 = AppE Proxy Lt  (pairE e 0)
+                   c2 = AppE Proxy Equ (pairE e 0)
+                   e' = AppE Proxy Cond (tripleE c2 0 1)
+               in  AppE Proxy Cond (tripleE c1 (-1) e')
 
 instance Num (Exp Scientific) where
-    (+) e1 e2 = AppE Add (pairE e1 e2)
-    (*) e1 e2 = AppE Mul (pairE e1 e2)
-    (-) e1 e2 = AppE Sub (pairE e1 e2)
+    (+) e1 e2 = AppE Proxy Add (pairE e1 e2)
+    (*) e1 e2 = AppE Proxy Mul (pairE e1 e2)
+    (-) e1 e2 = AppE Proxy Sub (pairE e1 e2)
 
     fromInteger = ScientificE . fromInteger
 
-    abs e = let c = AppE Lt (pairE e 0)
-            in  AppE Cond (tripleE c (negate e) e)
+    abs e = let c = AppE Proxy Lt (pairE e 0)
+            in  AppE Proxy Cond (tripleE c (negate e) e)
 
-    signum e = let c1 = AppE Lt  (pairE e 0)
-                   c2 = AppE Equ (pairE e 0)
-                   e' = AppE Cond (tripleE c2 0 1)
-               in  AppE Cond (tripleE c1 (-1) e')
+    signum e = let c1 = AppE Proxy Lt  (pairE e 0)
+                   c2 = AppE Proxy Equ (pairE e 0)
+                   e' = AppE Proxy Cond (tripleE c2 0 1)
+               in  AppE Proxy Cond (tripleE c1 (-1) e')
 
 instance Fractional (Exp Double) where
-    (/) e1 e2    = AppE Div (pairE e1 e2)
+    (/) e1 e2    = AppE Proxy Div (pairE e1 e2)
     fromRational = DoubleE . fromRational
 
 instance Fractional (Exp Decimal) where
-    (/) e1 e2    = AppE Div (pairE e1 e2)
+    (/) e1 e2    = AppE Proxy Div (pairE e1 e2)
     fromRational = DecimalE . fromRational
 
 instance Fractional (Exp Scientific) where
-    (/) e1 e2    = AppE Div (pairE e1 e2)
+    (/) e1 e2    = AppE Proxy Div (pairE e1 e2)
     fromRational = ScientificE . fromRational
 
 instance Fractional (Q Decimal) where
@@ -262,15 +263,15 @@ instance Fractional (Q Scientific) where
 
 instance Floating (Exp Double) where
     pi     = DoubleE 3.141592653589793
-    sin e  = AppE Sin e
-    cos e  = AppE Cos e
-    tan e  = AppE Tan e
-    sqrt e = AppE Sqrt e
-    exp e  = AppE Exp e
-    log e  = AppE Log e
-    asin e = AppE ASin e
-    acos e = AppE ACos e
-    atan e = AppE ATan e
+    sin e  = AppE Proxy Sin e
+    cos e  = AppE Proxy Cos e
+    tan e  = AppE Proxy Tan e
+    sqrt e = AppE Proxy Sqrt e
+    exp e  = AppE Proxy Exp e
+    log e  = AppE Proxy Log e
+    asin e = AppE Proxy ASin e
+    acos e = AppE Proxy ACos e
+    atan e = AppE Proxy ATan e
     sinh   = $unimplemented
     cosh   = $unimplemented
     asinh  = $unimplemented
@@ -364,10 +365,12 @@ instance IsString (Q Text) where
 -- * Referring to persistent tables
 
 defaultHints :: NonEmpty Key -> TableHints
-defaultHints keys = TableHints keys PossiblyEmpty
+defaultHints keys = TableHints keys PossiblyEmpty NoProvenance
 
-table :: (QA a, TA a) => String -> NonEmpty ColName -> TableHints -> Q [a]
-table name schema hints = Q (TableE (TableDB name schema hints))
+table :: forall a k. (QA a, TA a, QA k, Typeable (Rep k))
+      => String -> NonEmpty ColName -> (Q a -> Q k) -> TableHints -> Q [a]
+table name schema keyProj hints =
+    Q (TableE (TableDB name schema hints) (toLam keyProj))
 
 -- * toQ
 
@@ -388,48 +391,48 @@ true :: Q Bool
 true = Q (BoolE True)
 
 not :: Q Bool -> Q Bool
-not (Q e) = Q (AppE Not e)
+not (Q e) = Q (AppE Proxy Not e)
 
 (&&) :: Q Bool -> Q Bool -> Q Bool
-(&&) (Q a) (Q b) = Q (AppE Conj (pairE a b))
+(&&) (Q a) (Q b) = Q (AppE Proxy Conj (pairE a b))
 
 (||) :: Q Bool -> Q Bool -> Q Bool
-(||) (Q a) (Q b) = Q (AppE Disj (TupleConstE (Tuple2E a b)))
+(||) (Q a) (Q b) = Q (AppE Proxy Disj (TupleConstE (Tuple2E a b)))
 
 -- * Equality and Ordering
 
 eq :: (QA a,Eq a,TA a) => Q a -> Q a -> Q Bool
-eq (Q a) (Q b) = Q (AppE Equ (TupleConstE (Tuple2E a b)))
+eq (Q a) (Q b) = Q (AppE Proxy Equ (TupleConstE (Tuple2E a b)))
 
 (==) :: (QA a,Eq a,TA a) => Q a -> Q a -> Q Bool
 (==) = eq
 
 neq :: (QA a,Eq a,TA a) => Q a -> Q a -> Q Bool
-neq (Q a) (Q b) = Q (AppE NEq (pairE a b))
+neq (Q a) (Q b) = Q (AppE Proxy NEq (pairE a b))
 
 (/=) :: (QA a,Eq a,TA a) => Q a -> Q a -> Q Bool
 (/=) = neq
 
 lt :: (QA a,Ord a,TA a) => Q a -> Q a -> Q Bool
-lt (Q a) (Q b) = Q (AppE Lt (pairE a b))
+lt (Q a) (Q b) = Q (AppE Proxy Lt (pairE a b))
 
 (<) :: (QA a,Ord a,TA a) => Q a -> Q a -> Q Bool
 (<) = lt
 
 lte :: (QA a,Ord a,TA a) => Q a -> Q a -> Q Bool
-lte (Q a) (Q b) = Q (AppE Lte (pairE a b))
+lte (Q a) (Q b) = Q (AppE Proxy Lte (pairE a b))
 
 (<=) :: (QA a,Ord a,TA a) => Q a -> Q a -> Q Bool
 (<=) = lte
 
 gte :: (QA a,Ord a,TA a) => Q a -> Q a -> Q Bool
-gte (Q a) (Q b) = Q (AppE Gte (pairE a b))
+gte (Q a) (Q b) = Q (AppE Proxy Gte (pairE a b))
 
 (>=) :: (QA a,Ord a,TA a) => Q a -> Q a -> Q Bool
 (>=) = gte
 
 gt :: (QA a,Ord a,TA a) => Q a -> Q a -> Q Bool
-gt (Q a) (Q b) = Q (AppE Gt (pairE a b))
+gt (Q a) (Q b) = Q (AppE Proxy Gt (pairE a b))
 
 (>) :: (QA a,Ord a,TA a) => Q a -> Q a -> Q Bool
 (>) = gt
@@ -442,11 +445,11 @@ max a b = cond (a > b) a b
 
 -- | Remainder of division.
 rem :: Q Integer -> Q Integer -> Q Integer
-rem (Q a) (Q b) = Q (AppE Mod (pairE a b))
+rem (Q a) (Q b) = Q (AppE Proxy Mod (pairE a b))
 
 -- | Integer division truncated towards zero.
 quot :: Q Integer -> Q Integer -> Q Integer
-quot (Q a) (Q b) = Q (AppE Div (pairE a b))
+quot (Q a) (Q b) = Q (AppE Proxy Div (pairE a b))
 
 -- * Conditionals
 
@@ -454,7 +457,7 @@ bool :: (QA a) => Q a -> Q a -> Q Bool -> Q a
 bool f t b = cond b t f
 
 cond :: (QA a) => Q Bool -> Q a -> Q a -> Q a
-cond (Q c) (Q a) (Q b) = Q (AppE Cond (TupleConstE (Tuple3E c a b)))
+cond (Q c) (Q a) (Q b) = Q (AppE Proxy Cond (TupleConstE (Tuple3E c a b)))
 
 ifThenElse :: (QA a) => Q Bool -> Q a -> Q a -> Q a
 ifThenElse = cond
@@ -464,37 +467,45 @@ ifThenElse = cond
 
 -- * Maybe
 
-listToMaybe :: (QA a) => Q [a] -> Q (Maybe a)
-listToMaybe (Q as) = Q as
+maybeToPair :: (QA a, Default a) => Q (Maybe a) -> Q (Bool, a)
+maybeToPair (Q a) = Q a
 
-maybeToList :: (QA a) => Q (Maybe a) -> Q [a]
-maybeToList (Q ma) = Q ma
+pairToMaybe :: (QA a, Default a) => Q (Bool, a) -> Q (Maybe a)
+pairToMaybe (Q a) = Q a
 
-nothing :: (QA a) => Q (Maybe a)
-nothing = listToMaybe nil
+listToMaybe :: (QA a, Default a) => Q [a] -> Q (Maybe a)
+listToMaybe a = ifThenElse (null a) nothing (just (head a))
 
-just :: (QA a) => Q a -> Q (Maybe a)
-just a = listToMaybe (singleton a)
+maybeToList :: (QA a, Default a) => Q (Maybe a) -> Q [a]
+maybeToList ma = ifThenElse (fst p) (singleton (snd p)) nil
+    where
+      p = maybeToPair ma
 
-isNothing :: (QA a) => Q (Maybe a) -> Q Bool
+nothing :: forall a. (QA a, Default a) => Q (Maybe a)
+nothing = Q (TupleConstE (Tuple2E (BoolE False) (toExp (def :: a))))
+
+just :: (QA a, Default a) => Q a -> Q (Maybe a)
+just (Q a) = Q (TupleConstE (Tuple2E (BoolE True) a))
+
+isNothing :: (QA a, Default a) => Q (Maybe a) -> Q Bool
 isNothing ma = null (maybeToList ma)
 
-isJust :: (QA a) => Q (Maybe a) -> Q Bool
+isJust :: (QA a, Default a) => Q (Maybe a) -> Q Bool
 isJust ma = not (isNothing ma)
 
-fromJust :: (QA a) => Q (Maybe a) -> Q a
+fromJust :: (QA a, Default a) => Q (Maybe a) -> Q a
 fromJust ma = head (maybeToList ma)
 
-maybe :: (QA a,QA b) => Q b -> (Q a -> Q b) -> Q (Maybe a) -> Q b
+maybe :: (QA a, QA b, Default a) => Q b -> (Q a -> Q b) -> Q (Maybe a) -> Q b
 maybe b f ma = isNothing ma ? (b,f (fromJust ma))
 
-fromMaybe :: (QA a) => Q a -> Q (Maybe a) -> Q a
+fromMaybe :: (QA a, Default a) => Q a -> Q (Maybe a) -> Q a
 fromMaybe a ma = isNothing ma ? (a,fromJust ma)
 
-catMaybes :: (QA a) => Q [Maybe a] -> Q [a]
+catMaybes :: (QA a, Default a) => Q [Maybe a] -> Q [a]
 catMaybes = concatMap maybeToList
 
-mapMaybe :: (QA a,QA b) => (Q a -> Q (Maybe b)) -> Q [a] -> Q [b]
+mapMaybe :: (QA a, QA b, Default b) => (Q a -> Q (Maybe b)) -> Q [a] -> Q [b]
 mapMaybe f = concatMap (maybeToList . f)
 
 -- * Either
@@ -537,7 +548,7 @@ nil :: (QA a) => Q [a]
 nil = Q (ListE S.empty)
 
 cons :: (QA a) => Q a -> Q [a] -> Q [a]
-cons (Q a) (Q as) = Q (AppE Cons (pairE a as))
+cons (Q a) (Q as) = Q (AppE Proxy Cons (pairE a as))
 
 (<|) :: (QA a) => Q a -> Q [a] -> Q [a]
 (<|) = cons
@@ -554,7 +565,7 @@ singleton (Q e) = cons (Q e) nil
 -- * List Operations
 
 only :: QA a => Q [a] -> Q a
-only (Q as) = Q (AppE Only as)
+only (Q as) = Q (AppE Proxy Only as)
 
 head :: (QA a) => Q [a] -> Q a
 head as = only $ map fst $ filter (\xp -> snd xp == 1) $ number as
@@ -585,21 +596,21 @@ drop :: (QA a) => Q Integer -> Q [a] -> Q [a]
 drop i xs = map fst $ filter (\xp -> snd xp > i) $ number xs
 
 map :: (QA a,QA b) => (Q a -> Q b) ->  Q [a] -> Q [b]
-map f (Q as) = Q (AppE Map (pairE (LamE (toLam f)) as))
+map f (Q as) = Q (AppE Proxy Map (pairE (LamE (toLam f)) as))
 
 append :: (QA a) => Q [a] -> Q [a] -> Q [a]
-append (Q as) (Q bs) = Q (AppE Append (pairE as bs))
+append (Q as) (Q bs) = Q (AppE Proxy Append (pairE as bs))
 
 (++) :: (QA a) => Q [a] -> Q [a] -> Q [a]
 (++) = append
 
 filter :: (QA a) => (Q a -> Q Bool) -> Q [a] -> Q [a]
-filter f (Q as) = Q (AppE Filter (pairE (LamE (toLam f)) as))
+filter f (Q as) = Q (AppE Proxy Filter (pairE (LamE (toLam f)) as))
 
 -- | Partition a list into groups according to the supplied projection
 -- function.
 groupWithKey :: (QA a,QA b,Ord b, TA b) => (Q a -> Q b) -> Q [a] -> Q [(b,[a])]
-groupWithKey f (Q as) = Q (AppE GroupWithKey (pairE (LamE (toLam f)) as))
+groupWithKey f (Q as) = Q (AppE Proxy GroupWithKey (pairE (LamE (toLam f)) as))
 
 groupWith :: (QA a,QA b,Ord b, TA b) => (Q a -> Q b) -> Q [a] -> Q [[a]]
 groupWith f as = map snd (groupWithKey f as)
@@ -616,33 +627,33 @@ groupAggr k p agg as =
 
 
 sortWith :: (QA a,QA b,Ord b, TA b) => (Q a -> Q b) -> Q [a] -> Q [a]
-sortWith f (Q as) = Q (AppE SortWith (pairE (LamE (toLam f)) as))
+sortWith f (Q as) = Q (AppE Proxy SortWith (pairE (LamE (toLam f)) as))
 
 null :: (QA a) => Q [a] -> Q Bool
-null (Q as) = Q (AppE Null as)
+null (Q as) = Q (AppE Proxy Null as)
 
 empty :: QA a => Q [a] -> Q Bool
 empty = null
 
 length :: (QA a) => Q [a] -> Q Integer
-length (Q as) = Q (AppE Length as)
+length (Q as) = Q (AppE Proxy Length as)
 
 (!!) :: (QA a) => Q [a] -> Q Integer -> Q a
 (!!) = index
 
 reverse :: (QA a) => Q [a] -> Q [a]
-reverse (Q as) = Q (AppE Reverse as)
+reverse (Q as) = Q (AppE Proxy Reverse as)
 
 number :: (QA a) => Q [a] -> Q [(a, Integer)]
-number (Q as) = Q (AppE Number as)
+number (Q as) = Q (AppE Proxy Number as)
 
 -- * Special folds
 
 and :: Q [Bool] -> Q Bool
-and (Q bs) = Q (AppE And bs)
+and (Q bs) = Q (AppE Proxy And bs)
 
 or :: Q [Bool] -> Q Bool
-or (Q bs) = Q (AppE Or bs)
+or (Q bs) = Q (AppE Proxy Or bs)
 
 any :: (QA a) => (Q a -> Q Bool) -> Q [a] -> Q Bool
 any f = or . map f
@@ -651,22 +662,22 @@ all :: (QA a) => (Q a -> Q Bool) -> Q [a] -> Q Bool
 all f = and . map f
 
 sum :: (QA a,Num a) => Q [a] -> Q a
-sum (Q as) = Q (AppE Sum as)
+sum (Q as) = Q (AppE Proxy Sum as)
 
 avg :: (QA a, Fractional a) => Q [a] -> Q a
-avg (Q as) = Q (AppE Avg as)
+avg (Q as) = Q (AppE Proxy Avg as)
 
 concat :: (QA a) => Q [[a]] -> Q [a]
-concat (Q ass) = Q (AppE Concat ass)
+concat (Q ass) = Q (AppE Proxy Concat ass)
 
 concatMap :: (QA a,QA b) => (Q a -> Q [b]) -> Q [a] -> Q [b]
-concatMap f (Q as) = Q (AppE ConcatMap (pairE (LamE (toLam f)) as))
+concatMap f (Q as) = Q (AppE Proxy ConcatMap (pairE (LamE (toLam f)) as))
 
 maximum :: (QA a,Ord a,TA a) => Q [a] -> Q a
-maximum (Q as) = Q (AppE Maximum as)
+maximum (Q as) = Q (AppE Proxy Maximum as)
 
 minimum :: (QA a,Ord a,TA a) => Q [a] -> Q a
-minimum (Q as) = Q (AppE Minimum as)
+minimum (Q as) = Q (AppE Proxy Minimum as)
 
 -- * Sublists
 
@@ -705,13 +716,13 @@ elem a as = any (P.const $ toQ True) $ filter (== a) as
 notElem :: (QA a,Eq a,TA a) => Q a -> Q [a] -> Q Bool
 notElem a as = not (a `elem` as)
 
-lookup :: (QA a,QA b,Eq a,TA a) => Q a -> Q [(a, b)] -> Q (Maybe b)
+lookup :: (QA a,QA b,Eq a,TA a, Default b) => Q a -> Q [(a, b)] -> Q (Maybe b)
 lookup a  = listToMaybe . map snd . filter ((a ==) . fst)
 
 -- * Zipping and Unzipping Lists
 
 zip :: (QA a,QA b) => Q [a] -> Q [b] -> Q [(a,b)]
-zip (Q as) (Q bs) = Q (AppE Zip (pairE as bs))
+zip (Q as) (Q bs) = Q (AppE Proxy Zip (pairE as bs))
 
 zipWith :: (QA a,QA b,QA c) => (Q a -> Q b -> Q c) -> Q [a] -> Q [b] -> Q [c]
 zipWith f as bs = map (\e -> f (fst e) (snd e)) (zip as bs)
@@ -733,24 +744,24 @@ unzip3 abcs = triple (map (\e -> (case view e of (a,_,_) -> a)) abcs)
 
 -- * Set-oriented operations
 
-nub :: (QA a,Eq a,TA a) => Q [a] -> Q [a]
-nub (Q as) = Q (AppE Nub as)
+nub :: forall a. (QA a, Eq a, TA a) => Q [a] -> Q [a]
+nub (Q as) = Q (AppE Proxy Nub as)
 
 -- * Tuple Projection Functions
 
-fst :: (QA a,QA b) => Q (a,b) -> Q a
-fst (Q e) = Q (AppE Fst e)
+fst :: forall a b. (QA a, QA b) => Q (a,b) -> Q a
+fst (Q e) = Q (AppE Proxy Fst e)
 
-snd :: (QA a,QA b) => Q (a,b) -> Q b
-snd (Q e) = Q (AppE Snd e)
+snd :: forall a b. (QA a, QA b) => Q (a,b) -> Q b
+snd (Q e) = Q (AppE Proxy Snd e)
 
 -- * Conversions between numeric types
 
 integerToDouble :: Q Integer -> Q Double
-integerToDouble (Q i) = Q (AppE IntegerToDouble i)
+integerToDouble (Q i) = Q (AppE Proxy IntegerToDouble i)
 
 integerToDecimal :: Q Integer -> Q Decimal
-integerToDecimal (Q i) = Q (AppE IntegerToDecimal i)
+integerToDecimal (Q i) = Q (AppE Proxy IntegerToDecimal i)
 
 -- * Text Functions
 
@@ -759,29 +770,29 @@ integerToDecimal (Q i) = Q (AppE IntegerToDecimal i)
 -- for single character wildcards and '_' for multi-character
 -- wildcards.
 like :: Q Text -> Q Text -> Q Bool
-like (Q t) (Q p) = Q (AppE Like (pairE t p))
+like (Q t) (Q p) = Q (AppE Proxy Like (pairE t p))
 
 notLike :: Q Text -> Q Text -> Q Bool
 notLike t p = not (like t p)
 
 subString :: Integer -> Integer -> Q Text -> Q Text
-subString from to (Q t) = Q (AppE (SubString from to) t)
+subString from to (Q t) = Q (AppE Proxy (SubString from to) t)
 
 -- * Date and Time Combinators
 
 addDays :: Q Integer -> Q Day -> Q Day
-addDays (Q i) (Q d) = Q (AppE AddDays (pairE i d))
+addDays (Q i) (Q d) = Q (AppE Proxy AddDays (pairE i d))
 
 subDays :: Q Integer -> Q Day -> Q Day
-subDays (Q i) (Q d) = Q (AppE SubDays (pairE i d))
+subDays (Q i) (Q d) = Q (AppE Proxy SubDays (pairE i d))
 
 diffDays :: Q Day -> Q Day -> Q Integer
-diffDays (Q d1) (Q d2) = Q (AppE DiffDays (pairE d1 d2))
+diffDays (Q d1) (Q d2) = Q (AppE Proxy DiffDays (pairE d1 d2))
 
 toGregorian :: Q Day -> Q (Integer, Integer, Integer)
-toGregorian (Q d) = Q $ tripleE (AppE DayYear d)
-                                (AppE DayMonth d)
-                                (AppE DayDay d)
+toGregorian (Q d) = Q $ tripleE (AppE Proxy DayYear d)
+                                (AppE Proxy DayMonth d)
+                                (AppE Proxy DayDay d)
 
 dateYear :: Q Day -> Q Integer
 dateYear d = let (view -> (year, _, _)) = toGregorian d
@@ -802,7 +813,7 @@ mzip :: (QA a,QA b) => Q [a] -> Q [b] -> Q [(a,b)]
 mzip = zip
 
 guard :: Q Bool -> Q [()]
-guard (Q c) = Q (AppE Guard c)
+guard (Q c) = Q (AppE Proxy Guard c)
 
 -- * Construction of tuples
 
