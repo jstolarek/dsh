@@ -11,7 +11,6 @@ import           Control.Monad.Reader
 import qualified Data.Foldable                  as F
 import           Data.List.NonEmpty             (NonEmpty (..))
 import qualified Data.List.NonEmpty             as N
-import           Data.Maybe
 
 import           Database.DSH.Common.Impossible
 
@@ -21,8 +20,6 @@ import           Database.DSH.Common.Type
 import qualified Database.DSH.CL.Desugar        as D
 import           Database.DSH.CL.Lang           (toList)
 import qualified Database.DSH.CL.Lang           as CL
-import qualified Database.DSH.CL.Primitives     as CLP
-import qualified Database.DSH.CL.Opt.Auxiliary  as CLAux
 import qualified Database.DSH.NKL.Lang          as NKL
 import qualified Database.DSH.NKL.Primitives    as P
 import           Database.DSH.NKL.Rewrite
@@ -306,42 +303,32 @@ desugarQuals (CL.BindQ x xs : qs) = do
 -- filtered) cartesian product of all qualifiers. The head expression
 -- ist then simply mapped over the resulting list.
 desugarComprehension :: Type -> CL.Expr -> [CL.Qual] -> NameEnv NKL.Expr
-desugarComprehension _ e qs
-    | not (null qs) && (isJust $ mapM CLAux.fromGuard qs) = do
-          let conjExpr = case mapM CLAux.fromGuard qs of
-                  Just (p : []) -> p
-                  Just (p : ps) -> foldr CLP.conj p ps
-                  Just _        -> $impossible
-                  Nothing       -> $impossible
-          e'        <- expr e
-          conjExpr' <- expr conjExpr
-          pure $ P.if_ conjExpr' (P.sng e') (NKL.Const (typeOf e) (ListV []))
-    | otherwise = do
-          -- Desugar the qualifiers
-          (env, genExpr, wrapHead) <- desugarQuals qs
+desugarComprehension _ e qs = do
+    -- Desugar the qualifiers
+    (env, genExpr, wrapHead) <- desugarQuals qs
 
-          let genNames = concatMap qualVar qs
+    let genNames = concatMap qualVar qs
 
-          e'             <- local (++ genNames) (expr e)
-          -- All names that are bound in enclosing scopes, including names
-          -- bound by local generators
-          visibleNames   <- (++) genNames <$> ask
+    e'             <- local (++ genNames) (expr e)
+    -- All names that are bound in enclosing scopes, including names
+    -- bound by local generators
+    visibleNames   <- (++) genNames <$> ask
 
-          -- Avoid all visible names
-          n              <- freshIdent $ visibleNames ++ boundVars e'
+    -- Avoid all visible names
+    n              <- freshIdent $ visibleNames ++ boundVars e'
 
-          let t       = elemT $ typeOf genExpr
+    let t       = elemT $ typeOf genExpr
 
-              -- In the head expression, turn references to generator
-              -- variables into references to the (freshly chosen) map
-              -- variable. For substitution in the expression, we avoid all
-              -- names that are currently visible, including generator names
-              -- that are by now no longer visible. This should not hurt
-              -- though, as the information is only used for alpha-conversion
-              -- on lambdas during substitution.
-              e''      = substTupleAccesses visibleNames (n, t) env e'
+        -- In the head expression, turn references to generator
+        -- variables into references to the (freshly chosen) map
+        -- variable. For substitution in the expression, we avoid all
+        -- names that are currently visible, including generator names
+        -- that are by now no longer visible. This should not hurt
+        -- though, as the information is only used for alpha-conversion
+        -- on lambdas during substitution.
+        e''      = substTupleAccesses visibleNames (n, t) env e'
 
-          return $ wrapHead $ NKL.Iterator (ListT $ typeOf e') e'' n genExpr
+    return $ wrapHead $ NKL.Iterator (ListT $ typeOf e') e'' n genExpr
 
 -- | Express comprehensions through NKL iterators and explicit list filtering.
 desugarComprehensions :: CL.Expr -> NKL.Expr
