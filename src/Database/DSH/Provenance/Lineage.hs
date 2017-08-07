@@ -184,26 +184,31 @@ lineageTransform k (AppE proxy ConcatMap
 
       -- comprehension over singleton list containing data originally assigned
       -- to comprehension binder
+{-
       compSingOrg al = LetE boundVar (lineageDataE (VarE (proxyLineageElem proxy'') al))
                        (compLineageApp al)
-{-
+-}
 
       compSingOrg al = AppE (proxySingOrg proxy) ConcatMap (TupleConstE
              (Tuple2E (LamE (\a -> subst a boundVar (compLineageApp al)))
                       (singletonE (lineageDataE
                                    (VarE (proxyLineageElem proxy'') al)))))
--}
   return (AppE Proxy
                ConcatMap (TupleConstE (Tuple2E (LamE compSingOrg) tbl')))
 
 lineageTransform _   (VarE _ v)       = return (VarE Proxy v)
+{- JSTOLAREK: speculative
+lineageTransform k e@(ListE xs)       = do
+  xs' <- mapM (lineageTransform k) xs
+  return (emptyLineageListE e)
+-}
 lineageTransform _ e@(ListE _)        = return (emptyLineageListE e)
-lineageTransform _ e@(AppE _ Guard _) = return (emptyLineageListE e)
-{-
-lineageTransform k e@(AppE _ Guard b) = do --return (emptyLineageListE e)
+{- JSTOLAREK: speculative
+lineageTransform k e@(AppE _ Guard b) = do
   b' <- lineageTransform k b
   return (lineageE (AppE Proxy Guard (lineageDataE b')) (lineageProvE b'))
 -}
+lineageTransform _ e@(AppE _ Guard _) = return (emptyLineageListE e)
 lineageTransform _ e@(AppE _ Cons (TupleConstE (Tuple2E _ _))) =
   return (emptyLineageListE e)
 
@@ -249,13 +254,7 @@ lineageTransform k (AppE _ Reverse xs) = do
 lineageTransform _ (AppE _ Filter           _) = $unimplemented
 
 -- concat has type [[a]] -> [a].  According to our TF declaration if input is
--- [[a]] the return type is [L [a]], but we want [L a].  Even worse,
--- conceptually we would want the transformation to look like this
---
---   L(concat xs) = concat (map L xs)
---
--- but this would require mixing L, which is a meta operation, with object
--- language.
+-- [[a]] the return type is [L [a]], but we want [L a].
 lineageTransform _ (AppE _ Concat           _) = $unimplemented
 
 lineageTransform _ (AppE _ Sum              _) = $unimplemented
