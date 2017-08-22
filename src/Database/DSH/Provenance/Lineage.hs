@@ -16,9 +16,12 @@ module Database.DSH.Provenance.Lineage
     , lineageDataQ, lineageProvQ, emptyLineageQ
     ) where
 
+import           Data.Decimal
 import           Data.Proxy
 import           Data.Text
+import           Data.Time.Calendar               (Day)
 import           Data.Typeable
+import           Data.Scientific
 import qualified Data.Sequence as S
 import qualified Data.Set      as Set
 
@@ -86,8 +89,19 @@ lineage :: forall a k. (Reify (Rep a), Reify (Rep k), Typeable (Rep k))
 lineage (Q a) = Q (runLineage (lineageTransform (Proxy :: Proxy (Rep k)) a))
 
 type family LineageTransform a k where
-    LineageTransform [a]  k = [LineageE a k]
-    LineageTransform  a   k =  LineageE a k
+    LineageTransform ()         k =  LineageE () k
+    LineageTransform Bool       k =  LineageE Bool k
+    LineageTransform Char       k =  LineageE Char k
+    LineageTransform Integer    k =  LineageE Integer k
+    LineageTransform Double     k =  LineageE Double k
+    LineageTransform Text       k =  LineageE Text k
+    LineageTransform Decimal    k =  LineageE Decimal k
+    LineageTransform Scientific k =  LineageE Scientific k
+    LineageTransform Day        k =  LineageE Day k
+    LineageTransform [a]        k = [LineageE a k]
+    LineageTransform (a,b)      k = (LineageE a k, LineageE b k)
+    LineageTransform (a,b,c)    k = (LineageE a k, LineageE b k, LineageE c k)
+    -- JSTOLAREK: more tuple types, up to 16
 
 lineageTransform :: forall a k. ( Reify a, Reify k, Typeable k
                                 , Reify (LineageTransform a k))
