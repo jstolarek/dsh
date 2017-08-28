@@ -99,6 +99,8 @@ type family LineageTransform a k = r | r -> k where
     LineageTransform [a]        k = [LineageE (LineageTransform a k) k]
     LineageTransform (a,b)      k = (LineageE a k, LineageE b k)
     LineageTransform (a,b,c)    k = (LineageE a k, LineageE b k, LineageE c k)
+    LineageTransform (a,b,c,d)  k = ( LineageE a k, LineageE b k, LineageE c k
+                                    , LineageE d k)
     -- JSTOLAREK: more tuple types, up to 16
 
 class (QA a) => QLTable a where
@@ -152,6 +154,27 @@ instance (QLTable a, QLTable b) => QLTable (a, b) where
     ltEq _ k = case (ltEq (Proxy :: Proxy a) k, ltEq (Proxy :: Proxy b) k) of
                  (Refl, Refl) -> Refl
 
+instance (QLTable a, QLTable b, QLTable c)
+    => QLTable (a, b, c) where
+    type LT (a, b, c) k = (Lineage a k, Lineage b k, Lineage c k)
+    ltEq _ k =
+        let ltEqA = ltEq (Proxy :: Proxy a) k
+            ltEqB = ltEq (Proxy :: Proxy b) k
+            ltEqC = ltEq (Proxy :: Proxy c) k
+        in case (ltEqA, ltEqB, ltEqC) of
+             (Refl, Refl, Refl) -> Refl
+
+instance (QLTable a, QLTable b, QLTable c, QLTable d)
+    => QLTable (a, b, c, d) where
+    type LT (a, b, c, d) k = (Lineage a k, Lineage b k, Lineage c k, Lineage d k)
+    ltEq _ k =
+        let ltEqA = ltEq (Proxy :: Proxy a) k
+            ltEqB = ltEq (Proxy :: Proxy b) k
+            ltEqC = ltEq (Proxy :: Proxy c) k
+            ltEqD = ltEq (Proxy :: Proxy d) k
+        in case (ltEqA, ltEqB, ltEqC, ltEqD) of
+             (Refl, Refl, Refl, Refl) -> Refl
+
 -- | Perform lineage transformation on a query
 lineage :: forall a k.
            ( Reify (Rep a), Reify (Rep k), QA k, Typeable (Rep k), QLTable a
@@ -182,7 +205,6 @@ lineageTransform proxy t@(TableE (TableDB name _ _) keyProj) = do
                      (lineageAnnotE (pack name) (keyProj a :: Exp k))
       return (AppE Proxy Map (TupleConstE (Tuple2E (LamE lam) t)))
     Nothing -> $impossible
-
 
 lineageTransform k (AppE proxy Map
                     (TupleConstE (Tuple2E (LamE lam) tbl))) = do
