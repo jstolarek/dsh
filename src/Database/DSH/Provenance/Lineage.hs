@@ -4,6 +4,8 @@
 {-# LANGUAGE ScopedTypeVariables  #-}
 {-# LANGUAGE TemplateHaskell      #-}
 {-# LANGUAGE TypeFamilies         #-}
+{-# LANGUAGE TypeFamilyDependencies         #-}
+{-# LANGUAGE MultiParamTypeClasses         #-}
 {-# LANGUAGE TypeOperators        #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE ViewPatterns         #-}
@@ -13,7 +15,7 @@ module Database.DSH.Provenance.Lineage
       lineage, Lineage
 
       -- * Accessing data and provenance components of lineage-annotated value
-    , lineageDataQ, lineageProvQ, emptyLineageQ
+--    , lineageDataQ, lineageProvQ, emptyLineageQ
     ) where
 
 import           Data.Decimal
@@ -32,6 +34,7 @@ import           Database.DSH.Frontend.Internals
 import           Database.DSH.Frontend.TH
 import           Database.DSH.Frontend.TupleTypes
 
+import           Data.Type.Equality
 
 --------------------------------------------------------------------------------
 --                           LINEAGE DATA TYPES                               --
@@ -57,7 +60,7 @@ instance (QA key, Ord key) => QA (LineageAnnot key) where
     frExp as = LineageAnnot (Set.fromList (frExp as))
 
 data Lineage a k where
-    Lineage  :: a -> LineageAnnot k -> Lineage a k
+    Lineage :: a -> LineageAnnot k -> Lineage a k
 
 instance TA (Lineage a k)
 
@@ -83,12 +86,49 @@ type LineageE a k = (a, LineageAnnotE k)
 
 type LineageAnnotE k = [(Text, k)]
 
--- | Perform lineage transformation on a query
-lineage :: forall a k. (Reify (Rep a), Reify (Rep k), Typeable (Rep k))
-        => Q [a] -> Q [Lineage a k]
-lineage (Q a) = Q (runLineage (lineageTransform (Proxy :: Proxy (Rep k)) a))
+class (QA a) => QLTable a where
+    type family LT a k = r | r -> k
+    ltEq :: forall k. (QA k) => Proxy a -> Proxy k
+         -> LineageTransform (Rep a) (Rep k) :~: Rep (LT a k)
 
-type family LineageTransform a k where
+instance QLTable () where
+    type LT () k = Lineage () k
+    ltEq _ _ = Refl
+
+instance QLTable Bool where
+    type LT Bool k =  Lineage Bool k
+    ltEq _ _ = Refl
+
+instance QLTable a => QLTable [a] where
+    type LT [a] k = [Lineage (LT a k) k]
+    ltEq _ k = case ltEq (Proxy :: Proxy a) k of
+                 Refl -> Refl
+
+instance (QLTable a, QLTable b) => QLTable (a, b) where
+    type LT (a, b) k = (Lineage a k, Lineage b k)
+    ltEq _ k = case (ltEq (Proxy :: Proxy a) k, ltEq (Proxy :: Proxy b) k) of
+                 (Refl, Refl) -> Refl
+
+cong :: (a :~: c) -> (Exp a :~: Exp c)
+cong Refl = Refl
+
+{-
+-- JSTOLAREK: this does not compile
+type instance LT Char       k =  Lineage Char k
+type instance LT Integer    k =  Lineage Integer k
+type instance LT Double     k =  Lineage Double k
+type instance LT Text       k =  Lineage Text k
+type instance LT Decimal    k =  Lineage Decimal k
+type instance LT Scientific k =  Lineage Scientific k
+type instance LT Day        k =  Lineage Day k
+-}
+-- | Perform lineage transformation on a query
+lineage :: forall a k. (Reify (Rep a), Reify (Rep k), QA k, Typeable (Rep k), QLTable a, Reify (LineageTransform (Rep a) (Rep k)))
+        => Q a -> Q (LT a k)
+lineage q@(Q a) = Q (castWith (cong (ltEq (Proxy :: Proxy a) (Proxy :: Proxy k)))
+                                  (runLineage (lineageTransform (Proxy :: Proxy (Rep k)) a)))
+
+type family LineageTransform a k = r | r -> k where
     LineageTransform ()         k =  LineageE () k
     LineageTransform Bool       k =  LineageE Bool k
     LineageTransform Char       k =  LineageE Char k
@@ -98,7 +138,7 @@ type family LineageTransform a k where
     LineageTransform Decimal    k =  LineageE Decimal k
     LineageTransform Scientific k =  LineageE Scientific k
     LineageTransform Day        k =  LineageE Day k
-    LineageTransform [a]        k = [LineageE a k]
+    LineageTransform [a]        k = [LineageE (LineageTransform a k) k]
     LineageTransform (a,b)      k = (LineageE a k, LineageE b k)
     LineageTransform (a,b,c)    k = (LineageE a k, LineageE b k, LineageE c k)
     -- JSTOLAREK: more tuple types, up to 16
@@ -106,6 +146,9 @@ type family LineageTransform a k where
 lineageTransform :: forall a k. ( Reify a, Reify k, Typeable k
                                 , Reify (LineageTransform a k))
                  => Proxy k -> Exp a -> Compile (Exp (LineageTransform a k))
+lineageTransform _ _ = $unimplemented
+{-
+
 lineageTransform proxy t@(TableE (TableDB name _ _) keyProj) = do
   let -- We have to perform runtime type equality to check that type of lineage
       -- key specified in a call to `lineage` matches the type returned by
@@ -336,7 +379,7 @@ lineageTransform _ (TupleConstE      _) = $impossible
 lineageTransform _ (LetE _ _ _) = $impossible
 -- JSTOLAREK: think about lambdas
 lineageTransform _ (LamE _    ) = $impossible
-
+-}
 
 --------------------------------------------------------------------------------
 --             ACCESSING LINEAGE DATA AND PROVENANCE COMPONENTS               --
