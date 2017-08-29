@@ -86,16 +86,16 @@ type LineageE a k = (a, LineageAnnotE k)
 
 type LineageAnnotE k = [(Text, k)]
 
-type family LineageTransform a k = r | r -> k where
-    LineageTransform ()         k =  LineageE () k
-    LineageTransform Bool       k =  LineageE Bool k
-    LineageTransform Char       k =  LineageE Char k
-    LineageTransform Integer    k =  LineageE Integer k
-    LineageTransform Double     k =  LineageE Double k
-    LineageTransform Text       k =  LineageE Text k
-    LineageTransform Decimal    k =  LineageE Decimal k
-    LineageTransform Scientific k =  LineageE Scientific k
-    LineageTransform Day        k =  LineageE Day k
+type family LineageTransform a k = r | r -> a where
+    LineageTransform ()         k =  ()
+    LineageTransform Bool       k =  Bool
+    LineageTransform Char       k =  Char
+    LineageTransform Integer    k =  Integer
+    LineageTransform Double     k =  Double
+    LineageTransform Text       k =  Text
+    LineageTransform Decimal    k =  Decimal
+    LineageTransform Scientific k =  Scientific
+    LineageTransform Day        k =  Day
     LineageTransform [a]        k = [LineageE (LineageTransform a k) k]
     LineageTransform (a,b)      k = (LineageE a k, LineageE b k)
     LineageTransform (a,b,c)    k = (LineageE a k, LineageE b k, LineageE c k)
@@ -104,44 +104,44 @@ type family LineageTransform a k = r | r -> k where
     -- JSTOLAREK: more tuple types, up to 16
 
 class (QA a) => QLTable a where
-    type family LT a k = r | r -> k
+    type family LT a k
     ltEq :: forall k. (QA k) => Proxy a -> Proxy k
          -> LineageTransform (Rep a) (Rep k) :~: Rep (LT a k)
 
 instance QLTable () where
-    type LT () k = Lineage () k
+    type LT () k = () --Lineage () k
     ltEq _ _ = Refl
 
 instance QLTable Bool where
-    type LT Bool k =  Lineage Bool k
+    type LT Bool k = Bool -- Lineage Bool k
     ltEq _ _ = Refl
 
 instance QLTable Char where
-    type LT Char k =  Lineage Char k
+    type LT Char k = Char -- Lineage Char k
     ltEq _ _ = Refl
 
 instance QLTable Integer where
-    type LT Integer k =  Lineage Integer k
+    type LT Integer k = Integer -- Lineage Integer k
     ltEq _ _ = Refl
 
 instance QLTable Double where
-    type LT Double k =  Lineage Double k
+    type LT Double k = Double -- Lineage Double k
     ltEq _ _ = Refl
 
 instance QLTable Text where
-    type LT Text k =  Lineage Text k
+    type LT Text k = Text -- Lineage Text k
     ltEq _ _ = Refl
 
 instance QLTable Decimal where
-    type LT Decimal k =  Lineage Decimal k
+    type LT Decimal k = Decimal -- Lineage Decimal k
     ltEq _ _ = Refl
 
 instance QLTable Scientific where
-    type LT Scientific k =  Lineage Scientific k
+    type LT Scientific k = Scientific -- Lineage Scientific k
     ltEq _ _ = Refl
 
 instance QLTable Day where
-    type LT Day k =  Lineage Day k
+    type LT Day k = Day -- Lineage Day k
     ltEq _ _ = Refl
 
 instance QLTable a => QLTable [a] where
@@ -179,15 +179,14 @@ instance (QLTable a, QLTable b, QLTable c, QLTable d)
 lineage :: forall a k.
            ( Reify (Rep a), Reify (Rep k), QA k, Typeable (Rep k), QLTable a
            , Reify (LineageTransform (Rep a) (Rep k)) )
-        => Q a -> Q (LT a k)
-lineage q@(Q a) =
+        => Proxy k -> Q a -> Q (LT a k)
+lineage _ q@(Q a) =
    let pa  = Proxy :: Proxy a
        pk  = Proxy :: Proxy k
        prk = Proxy :: Proxy (Rep k)
    in Q (castWith (apply Refl (ltEq pa pk)) (runLineage (lineageTransform prk a)))
 
-lineageTransform :: forall a k. ( Reify a, Reify k, Typeable k
-                                , Reify (LineageTransform a k))
+lineageTransform :: forall a k. ( Reify a, Reify k, Typeable k)
                  => Proxy k -> Exp a -> Compile (Exp (LineageTransform a k))
 lineageTransform _ _ = $unimplemented
 {-
