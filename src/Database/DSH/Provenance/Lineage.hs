@@ -177,8 +177,7 @@ instance (QLTable a, QLTable b, QLTable c, QLTable d)
 
 -- | Perform lineage transformation on a query
 lineage :: forall a k.
-           ( Reify (Rep a), Reify (Rep k), QA k, Typeable (Rep k), QLTable a
-           , Reify (LineageTransform (Rep a) (Rep k)) )
+           ( Reify (Rep a), QA k, Typeable (Rep k), QLTable a )
         => Proxy k -> Q a -> Q (LT a k)
 lineage _ q@(Q a) =
    let pa  = Proxy :: Proxy a
@@ -188,8 +187,6 @@ lineage _ q@(Q a) =
 
 lineageTransform :: forall a k. ( Reify a, Reify k, Typeable k)
                  => Proxy k -> Exp a -> Compile (Exp (LineageTransform a k))
-lineageTransform _ _ = $unimplemented
-{-
 lineageTransform proxy t@(TableE (TableDB name _ _) keyProj) = do
   let -- We have to perform runtime type equality to check that type of lineage
       -- key specified in a call to `lineage` matches the type returned by
@@ -199,12 +196,14 @@ lineageTransform proxy t@(TableE (TableDB name _ _) keyProj) = do
       keyEquality _ _ = eqT
   case keyEquality proxy keyProj of
     Just Refl -> do
-      let lam :: Reify b => Integer -> Exp (b, LineageAnnotE k)
+      let lam :: Reify b => Integer -> Exp (LineageE b k)
           lam a = lineageE (VarE Proxy a)
                      (lineageAnnotE (pack name) (keyProj a :: Exp k))
       return (AppE Proxy Map (TupleConstE (Tuple2E (LamE lam) t)))
     Nothing -> $impossible
 
+lineageTransform _ _ = $unimplemented
+{-
 lineageTransform k (AppE proxy Map
                     (TupleConstE (Tuple2E (LamE lam) tbl))) = do
   -- translate the comprehension generator
@@ -443,12 +442,11 @@ emptyLineageQ (Q a) = Q (emptyLineageE a)
 --------------------------------------------------------------------------------
 
 -- | Lineage constructor
-lineageE :: (Reify a, Reify k)
-         => Exp a -> Exp (LineageAnnotE k) -> Exp (LineageE a k)
+lineageE :: Exp a -> Exp (LineageAnnotE k) -> Exp (LineageE a k)
 lineageE row lin = TupleConstE (Tuple2E row lin)
 
 -- | Attach empty lineage to a value
-emptyLineageE :: (Reify a, Reify k) => Exp a -> Exp (LineageE a k)
+emptyLineageE :: Reify k => Exp a -> Exp (LineageE a k)
 emptyLineageE a = TupleConstE (Tuple2E a (ListE (S.empty)))
 
 -- | Lineage annotation constructor
@@ -457,7 +455,7 @@ lineageAnnotE table_name key =
     singletonE (TupleConstE (Tuple2E (TextE table_name) key))
 
 -- | Append two lineage annotations
-lineageAppendE :: Reify k => Exp (LineageAnnotE k) -> Exp (LineageAnnotE k)
+lineageAppendE :: Exp (LineageAnnotE k) -> Exp (LineageAnnotE k)
                -> Exp (LineageAnnotE k)
 lineageAppendE a b = AppE Proxy Append (pairE a b)
 
@@ -466,12 +464,11 @@ singletonE :: Reify a => Exp a -> Exp [a]
 singletonE = ListE . S.singleton
 
 -- | Extract data from a lineage-annotated row
-lineageDataE :: (Reify a, Reify k) => Exp (LineageE a k) -> Exp a
+lineageDataE :: Exp (LineageE a k) -> Exp a
 lineageDataE = AppE Proxy (TupElem Tup2_1)
 
 -- | Extract lineage from a lineage-annotated row
-lineageProvE :: (Reify a, Reify k)
-             => Exp (LineageE a k) -> Exp (LineageAnnotE k)
+lineageProvE :: Exp (LineageE a k) -> Exp (LineageAnnotE k)
 lineageProvE = AppE Proxy (TupElem Tup2_2)
 
 -- | Construct a lambda that adds empty lineage to its argument:

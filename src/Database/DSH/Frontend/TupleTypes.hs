@@ -448,17 +448,12 @@ mkTupleCons tupTyName conName elemTyCons width = do
         -- a ~ (t1, ..., t<n>)
         tupConstraint    = equalConstrTy (VarT tupTyName) tupTy
 
-        -- Reify t1, ..., Reify t<n>
-        reifyConstraints = map (\n -> nameTyApp (mkName "Reify") (VarT n)) tupElemTyNames
-
-        constraints      = tupConstraint : reifyConstraints
-
     let -- '(Exp/Type t1) ... (Exp/Type t<n>)'
         elemTys = [ (strict, elemTyCons (VarT t))
                   | t <- tupElemTyNames
                   ]
 
-    return $ ForallC tyVarBinders constraints
+    return $ ForallC tyVarBinders [tupConstraint]
            $ NormalC (conName width) elemTys
   where
     strict = Bang NoSourceUnpackedness SourceStrict
@@ -469,10 +464,10 @@ mkTupleCons tupTyName conName elemTyCons width = do
 --
 -- @
 -- data TupleConst a where
---     Tuple<n>E :: (Reify t1, ..., Reify t<n>) => Exp t1
---                                              -> ...
---                                              -> Exp t<n>
---                                              -> TupleConst (t1, ..., t<n>)
+--     Tuple<n>E :: Exp t1
+--               -> ...
+--               -> Exp t<n>
+--               -> TupleConst (t1, ..., t<n>)
 -- @
 --
 -- Because TH does not directly support GADT syntax, we have to
@@ -480,10 +475,7 @@ mkTupleCons tupTyName conName elemTyCons width = do
 --
 -- @
 -- data TupleConst a =
---     forall t1, ..., t<n>. a ~ (t1, ..., t<n>),
---                           Reify t1,
---                           ...
---                           Reify t<n> =>
+--     forall t1, ..., t<n>. a ~ (t1, ..., t<n>) =>
 --                           Exp t1 -> ... -> Exp t<n>
 -- @
 mkTupleASTTy :: Name -> (Type -> Type) -> (Int -> Name) -> Int -> Q [Dec]

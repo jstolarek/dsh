@@ -135,14 +135,14 @@ data Exp a where
     DecimalE    :: !Decimal -> Exp Decimal
     ScientificE :: !Scientific -> Exp Scientific
     DayE        :: !Day     -> Exp Day
-    ListE       :: (Reify a)          => !(S.Seq (Exp a)) -> Exp [a]
-    AppE        :: (Reify a, Reify b) => Proxy a -> Fun a b -> Exp a -> Exp b
-    LamE        :: (Reify a, Reify b) => (Integer -> Exp b) -> Exp (a -> b)
-    VarE        :: (Reify a)          =>  Proxy a -> Integer -> Exp a
-    TableE      :: (Reify a, Reify k, Typeable k)
+    ListE       :: Reify a => !(S.Seq (Exp a)) -> Exp [a]
+    AppE        :: Proxy a -> Fun a b -> Exp a -> Exp b
+    LamE        :: (Integer -> Exp b) -> Exp (a -> b)
+    VarE        :: Reify a => Proxy a -> Integer -> Exp a
+    TableE      :: (Reify a, Typeable k)
                 => Table -> (Integer -> Exp k) -> Exp [a]
     TupleConstE :: !(TupleConst a) -> Exp a
-    LetE        :: (Reify a, Reify b) => Integer -> Exp a -> Exp b -> Exp b
+    LetE        :: Integer -> Exp a -> Exp b -> Exp b
 
 data Type a where
     UnitT       :: Type ()
@@ -177,10 +177,10 @@ instance Pretty (TupleType a) where
     pretty (Tuple2T t1 t2) = tupled [pretty t1, pretty t2]
     pretty _               = $unimplemented
 
-pairE :: (Reify a, Reify b) => Exp a -> Exp b -> Exp (a, b)
+pairE :: Exp a -> Exp b -> Exp (a, b)
 pairE a b = TupleConstE (Tuple2E a b)
 
-tripleE :: (Reify a, Reify b, Reify c) => Exp a -> Exp b -> Exp c -> Exp (a, b, c)
+tripleE :: Exp a -> Exp b -> Exp c -> Exp (a, b, c)
 tripleE a b c = TupleConstE (Tuple3E a b c)
 
 --------------------------------------------------------------------------------

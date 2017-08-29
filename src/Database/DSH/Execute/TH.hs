@@ -118,11 +118,6 @@ mkTupleLytCons tupTyName lytTyCons conName width = do
         -- a ~ (t1, ..., t<n>)
         tupConstraint    = equalConstrTy (VarT tupTyName) tupTy
 
-        -- Reify t1, ..., Reify t<n>
-        reifyConstraints = map (\n -> nameTyApp ''DSH.Reify (VarT n)) tupElemTyNames
-
-        constraints      = tupConstraint : reifyConstraints
-
     let -- 'Type a'
         dshTypeTy  = (strict, AppT (ConT ''DSH.Type) (VarT tupTyName))
         -- 'TabLayout t1, TabLayout t<n>
@@ -131,7 +126,7 @@ mkTupleLytCons tupTyName lytTyCons conName width = do
                      ]
         argTys     = dshTypeTy : elemLytTys
 
-    return $ ForallC tyVarBinders constraints
+    return $ ForallC tyVarBinders [tupConstraint]
            $ NormalC (conName width) {- (tabTupleConsName width) -} argTys
   where
     strict = Bang NoSourceUnpackedness SourceStrict
@@ -140,11 +135,11 @@ mkTupleLytCons tupTyName lytTyCons conName width = do
 -- tabular query results.
 -- @
 -- data TabTuple a where
---     TTuple3 :: (Reify t1, ..., Reify t<n>) => Type (t1, ..., t<n>)
---                                            -> TabLayout t1
---                                            -> ...
---                                            -> TabLayout t<n>
---                                            -> TabTuple (t1, ..., t<n>)
+--     TTuple3 :: Type (t1, ..., t<n>)
+--             -> TabLayout t1
+--             -> ...
+--             -> TabLayout t<n>
+--             -> TabTuple (t1, ..., t<n>)
 -- @
 --
 -- Because TH does not directly support GADT syntax, we have to
@@ -152,10 +147,7 @@ mkTupleLytCons tupTyName lytTyCons conName width = do
 --
 -- @
 -- data TabTuple a =
---     forall t1, ..., t<n>. a ~ (t1, ..., t<n>),
---                           Reify t1,
---                           ...
---                           Reify t<n> =>
+--     forall t1, ..., t<n>. a ~ (t1, ..., t<n>) =>
 --                           Type a -> TabLayout t1 -> ... -> TabLayout t<n>
 -- @
 mkTupleLyt :: Name -> (Type -> Type) -> (Int -> Name) -> Int -> Q [Dec]
