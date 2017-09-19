@@ -61,6 +61,8 @@ class View a where
 
 newtype Q a = Q (Exp (Rep a))
 
+data DReify a = MkReify (a -> Type a)
+
 --------------------------------------------------------------------------------
 -- Typed frontend ASTs
 
@@ -138,7 +140,7 @@ data Exp a where
     ListE       :: Reify a => !(S.Seq (Exp a)) -> Exp [a]
     AppE        :: Proxy a -> Fun a b -> Exp a -> Exp b
     LamE        :: (Integer -> Exp b) -> Exp (a -> b)
-    VarE        :: Reify a => Proxy a -> Integer -> Exp a
+    VarE        :: DReify a -> Integer -> Exp a
     TableE      :: (Reify a, Typeable k)
                 => Table -> (Integer -> Exp k) -> Exp [a]
     TupleConstE :: !(TupleConst a) -> Exp a
@@ -154,8 +156,8 @@ data Type a where
     DecimalT    :: Type Decimal
     ScientificT :: Type Scientific
     DayT        :: Type Day
-    ListT       :: (Reify a)          => Type a -> Type [a]
-    ArrowT      :: (Reify a,Reify b)  => Type a -> Type b -> Type (a -> b)
+    ListT       :: Reify a => Type a -> Type [a]
+    ArrowT      :: Type a -> Type b -> Type (a -> b)
     TupleT      :: TupleType a -> Type a
 
 instance Pretty (Type a) where
@@ -255,7 +257,7 @@ unQ :: Q a -> Exp (Rep a)
 unQ (Q e) = e
 
 toLam :: (QA a, QA b) => (Q a -> Q b) -> Integer -> Exp (Rep b)
-toLam f = unQ . f . Q . (VarE Proxy)
+toLam f = unQ . f . Q . (VarE (MkReify reify))
 
 -- * Generate Reify instances for tuple types
 mkReifyInstances 16

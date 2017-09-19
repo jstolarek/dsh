@@ -177,16 +177,47 @@ instance (QLTable a, QLTable b, QLTable c, QLTable d)
 
 -- | Perform lineage transformation on a query
 lineage :: forall a k.
-           ( Reify (Rep a), QA k, Typeable (Rep k), QLTable a )
+           ( Reify (Rep a), QA k, Typeable (Rep k), QLTable a
+           , Reify (LineageTransform (Rep a) (Rep k)) )
         => Proxy k -> Q a -> Q (LT a k)
-lineage _ q@(Q a) =
+lineage pk (Q a) =
    let pa  = Proxy :: Proxy a
-       pk  = Proxy :: Proxy k
        prk = Proxy :: Proxy (Rep k)
    in Q (castWith (apply Refl (ltEq pa pk)) (runLineage (lineageTransform prk a)))
 
-lineageTransform :: forall a k. ( Reify a, Reify k, Typeable k)
+typeLT :: forall a k. Reify k
+       => Type a -> Type k -> Type (LineageTransform a k)
+typeLT (UnitT) _ = UnitT
+typeLT (BoolT) _ = BoolT
+typeLT (CharT) _ = CharT
+typeLT (IntegerT) _ = IntegerT
+typeLT (DoubleT) _ = DoubleT
+typeLT (TextT) _ = TextT
+typeLT (DecimalT) _ = DecimalT
+typeLT (ScientificT) _ = ScientificT
+typeLT (DayT) _ = DayT
+typeLT (ListT lt) kt = ListT (TupleT $ Tuple2T (typeLT lt kt)
+                                         (ListT (TupleT $ Tuple2T TextT kt)))
+              --           :: Type (LineageTransform a k)
+
+-- type LineageE a k = (a, LineageAnnotE k)
+-- type LineageAnnotE k = [(Text, k)]
+
+{-
+dReify :: Reify a => DReify a
+dReify = MkReify reify
+
+reifyLT :: forall a k. Reify (LineageTransform a k) => DReify a -> DReify k
+        -> DReify (LineageTransform a k)
+reifyLT (MkReify ra) (MkReify rb) =
+  MkReify (\_ -> typeLT (ra (undefined::a)) (rb (undefined::k)))
+-}
+
+lineageTransform :: forall a k. ( Reify a, Reify k, Typeable k
+                                , Reify (LineageTransform a k))
                  => Proxy k -> Exp a -> Compile (Exp (LineageTransform a k))
+lineageTransform _ _ = $unimplemented
+{-
 lineageTransform proxy t@(TableE (TableDB name _ _) keyProj) = do
   let -- We have to perform runtime type equality to check that type of lineage
       -- key specified in a call to `lineage` matches the type returned by
@@ -196,14 +227,12 @@ lineageTransform proxy t@(TableE (TableDB name _ _) keyProj) = do
       keyEquality _ _ = eqT
   case keyEquality proxy keyProj of
     Just Refl -> do
-      let lam :: Reify b => Integer -> Exp (LineageE b k)
-          lam a = lineageE (VarE Proxy a)
+      let lam :: DReify b -> Integer -> Exp (LineageE b k)
+          lam dreify a = lineageE (VarE dreify a)
                      (lineageAnnotE (pack name) (keyProj a :: Exp k))
-      return (AppE Proxy Map (TupleConstE (Tuple2E (LamE lam) t)))
+      return (AppE Proxy Map (TupleConstE (Tuple2E (LamE (lam (reifyLT dReify (dReify :: DReify k)))) t)))
     Nothing -> $impossible
 
-lineageTransform _ _ = $unimplemented
-{-
 lineageTransform k (AppE proxy Map
                     (TupleConstE (Tuple2E (LamE lam) tbl))) = do
   -- translate the comprehension generator
@@ -477,7 +506,7 @@ lineageProvE = AppE Proxy (TupElem Tup2_2)
 --
 emptyLineageLamE :: forall a k. (Reify a, Reify k)
                  => Integer -> Exp (LineageE a k)
-emptyLineageLamE x = emptyLineageE (VarE (Proxy :: Proxy a) x)
+emptyLineageLamE x = emptyLineageE (VarE (MkReify reify) x)
 
 -- | Add empty lineage to all elements in a list:
 --
@@ -519,8 +548,8 @@ proxyLineageElem Proxy = Proxy
 
 -- | Substitute variable x for variable v in an expression
 subst :: Integer -> Integer -> Exp b -> Exp b
-subst x v (VarE _ e)      | v == e    = VarE Proxy x
-                          | otherwise = VarE Proxy e
+subst x v (VarE r e)      | v == e    = VarE r x
+                          | otherwise = VarE r e
 subst _ _  UnitE          = UnitE
 subst _ _ (BoolE b)       = BoolE b
 subst _ _ (CharE c)       = CharE c

@@ -66,8 +66,8 @@ translate (TextE t) = return $ CP.string t
 translate (DecimalE d) = return $ CP.decimal $ fromRational $ toRational d
 translate (ScientificE d) = return $ CP.decimal d
 translate (DayE d) = return $ CP.day $ L.Date d
-translate (VarE _ i) = do
-    let ty = reify (undefined :: a)
+translate (VarE (MkReify reifyTy) i) = do
+    let ty = reifyTy (undefined :: a)
     return $ CP.var (translateType ty) (prefixVar i)
 translate (LetE x e1 e2) = do
     e1' <- translate e1
