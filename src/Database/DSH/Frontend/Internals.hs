@@ -137,7 +137,7 @@ data Exp a where
     DecimalE    :: !Decimal -> Exp Decimal
     ScientificE :: !Scientific -> Exp Scientific
     DayE        :: !Day     -> Exp Day
-    ListE       :: Reify a => !(S.Seq (Exp a)) -> Exp [a]
+    ListE       :: DReify a -> !(S.Seq (Exp a)) -> Exp [a]
     AppE        :: Proxy a -> Fun a b -> Exp a -> Exp b
     LamE        :: (Integer -> Exp b) -> Exp (a -> b)
     VarE        :: DReify a -> Integer -> Exp a
@@ -156,7 +156,7 @@ data Type a where
     DecimalT    :: Type Decimal
     ScientificT :: Type Scientific
     DayT        :: Type Day
-    ListT       :: Reify a => Type a -> Type [a]
+    ListT       :: Type a -> Type [a]
     ArrowT      :: Type a -> Type b -> Type (a -> b)
     TupleT      :: TupleType a -> Type a
 
@@ -257,7 +257,10 @@ unQ :: Q a -> Exp (Rep a)
 unQ (Q e) = e
 
 toLam :: (QA a, QA b) => (Q a -> Q b) -> Integer -> Exp (Rep b)
-toLam f = unQ . f . Q . (VarE (MkReify reify))
+toLam f = unQ . f . Q . (VarE mkReify)
+
+mkReify :: Reify a => DReify a
+mkReify = MkReify reify
 
 -- * Generate Reify instances for tuple types
 mkReifyInstances 16

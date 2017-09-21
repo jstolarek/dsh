@@ -73,8 +73,8 @@ translate (LetE x e1 e2) = do
     e1' <- translate e1
     e2' <- translate e2
     return $ CP.let_ (prefixVar x) e1' e2'
-translate (ListE es) = do
-    let ty = reify (undefined :: a)
+translate (ListE (MkReify (reifyTy :: b -> Type b)) es) = do
+    let ty = reifyTy (undefined :: b)
     CP.list (translateType ty) <$> mapM translate (toList es)
 -- We expect the query language to be first order. Lambdas must only
 -- occur as an argument to higher-order built-in combinators (map,

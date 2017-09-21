@@ -94,8 +94,8 @@ instance QA Day where
 
 instance (QA a) => QA [a] where
     type Rep [a] = [Rep a]
-    toExp as = ListE (P.fmap toExp $ fromList as)
-    frExp (ListE as) = toList $ P.fmap frExp as
+    toExp as = ListE mkReify (P.fmap toExp $ fromList as)
+    frExp (ListE _ as) = toList $ P.fmap frExp as
     frExp _ = $impossible
 
 instance (QA a, Default a) => QA (Maybe a) where
@@ -108,9 +108,11 @@ instance (QA a, Default a) => QA (Maybe a) where
 
 instance (QA a,QA b) => QA (Either a b) where
     type Rep (Either a b) = ([Rep a],[Rep b])
-    toExp (Left a)  = pairE (ListE (S.singleton $ toExp a)) (ListE S.empty)
-    toExp (Right b) = pairE (ListE S.empty) (ListE $ S.singleton $ toExp b)
-    frExp (TupleConstE (Tuple2E (ListE s1) (ListE s2))) =
+    toExp (Left a)  = pairE (ListE mkReify (S.singleton $ toExp a))
+                            (ListE mkReify S.empty)
+    toExp (Right b) = pairE (ListE mkReify S.empty)
+                            (ListE mkReify $ S.singleton $ toExp b)
+    frExp (TupleConstE (Tuple2E (ListE _ s1) (ListE _ s2))) =
         case (S.viewl s1, S.viewl s2) of
             (a S.:< _, _) -> Left (frExp a)
             (_, a S.:< _) -> Right (frExp a)
@@ -545,7 +547,7 @@ partitionEithers es = pair (lefts es) (rights es)
 -- * List Construction
 
 nil :: (QA a) => Q [a]
-nil = Q (ListE S.empty)
+nil = Q (ListE mkReify S.empty)
 
 cons :: (QA a) => Q a -> Q [a] -> Q [a]
 cons (Q a) (Q as) = Q (AppE Proxy Cons (pairE a as))
