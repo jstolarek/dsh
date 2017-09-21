@@ -98,7 +98,8 @@ type family LineageTransform a k = r | r -> a where
     LineageTransform Day        k =  Day
     LineageTransform (a -> b)   k =  a -> b
     LineageTransform [a]        k = [LineageE (LineageTransform a k) k]
-    LineageTransform (a,b)      k = (LineageE a k, LineageE b k)
+    LineageTransform (a,b)      k = (LineageTransform a k, LineageTransform b k)
+    -- JSTOLAREK: these definitions inconsistent with pair definition
     LineageTransform (a,b,c)    k = (LineageE a k, LineageE b k, LineageE c k)
     LineageTransform (a,b,c,d)  k = ( LineageE a k, LineageE b k, LineageE c k
                                     , LineageE d k)
@@ -151,7 +152,7 @@ instance QLTable a => QLTable [a] where
                  Refl -> Refl
 
 instance (QLTable a, QLTable b) => QLTable (a, b) where
-    type LT (a, b) k = (Lineage a k, Lineage b k)
+    type LT (a, b) k = (LT a k, LT b k)
     ltEq _ k = case (ltEq (Proxy :: Proxy a) k, ltEq (Proxy :: Proxy b) k) of
                  (Refl, Refl) -> Refl
 
@@ -200,9 +201,8 @@ typeLT (DayT)           _ = DayT
 typeLT (ArrowT fun arg) _ = (ArrowT fun arg)
 typeLT (ListT lt) kt = ListT (TupleT $ Tuple2T (typeLT lt kt)
                                             (ListT (TupleT $ Tuple2T TextT kt)))
-typeLT (TupleT (Tuple2T a b)) kt = TupleT (Tuple2T
-     (TupleT $ Tuple2T a (ListT (TupleT $ Tuple2T TextT kt)))
-     (TupleT $ Tuple2T b (ListT (TupleT $ Tuple2T TextT kt))))
+typeLT (TupleT (Tuple2T a b)) kt = TupleT (Tuple2T (typeLT a kt) (typeLT b kt))
+-- JSTOLAREK: these definitions inconsistent with pair definition
 typeLT (TupleT (Tuple3T a b c)) kt = TupleT (Tuple3T
      (TupleT $ Tuple2T a (ListT (TupleT $ Tuple2T TextT kt)))
      (TupleT $ Tuple2T b (ListT (TupleT $ Tuple2T TextT kt)))
@@ -244,6 +244,8 @@ lineageTransform proxy t@(TableE (TableDB name _ _) keyProj) = do
       ‘b1’ is a rigid type variable bound by
         a pattern with constructor:
           ConcatMap :: forall b1 a1. Reify b1 => Fun (a1 -> [b1], [a1]) [b1],
+
+      proxy :: Proxy (a1 -> [b1], [a1])
 -}
 lineageTransform k (AppE proxy ConcatMap
 {-
@@ -252,7 +254,6 @@ lineageTransform k (AppE proxy ConcatMap
                    LamE :: forall b a1. (Integer -> Exp b) -> Exp (a1 -> b),
 -}
                     (TupleConstE (Tuple2E (LamE lam) tbl))) = do
-
 
   -- translate the comprehension generator
   -- tbl' :: Exp [LineageE (LineageTransform a4 k) k]
@@ -263,8 +264,8 @@ lineageTransform k (AppE proxy ConcatMap
   bodyExp  <- lineageTransform k (lam boundVar)
 
   let -- Specialized proxy transformers
-      proxyRes :: Proxy (x -> [y], [x]) -> Proxy [y]
-      proxyRes Proxy = Proxy
+      --proxyRes :: Proxy (x -> [y], [x]) -> Proxy [y]
+      --proxyRes Proxy = Proxy
 
       proxyLineageApp :: Proxy (x -> [y], [x])
                       -> Proxy (LineageE y k -> LineageE y k, [LineageE y k])
@@ -274,10 +275,19 @@ lineageTransform k (AppE proxy ConcatMap
       proxySingOrg Proxy = Proxy
 
       -- proxies needed to guide variable types
-      proxy'  = proxyLineage (proxyElem (proxyRes proxy))
-      proxy'' = proxyLineage (proxySnd proxy)
+      --proxy'  = proxyLineage (proxyElem (proxyRes proxy))
+      --proxy'' = proxyLineage (proxySnd proxy)
 
       -- lambda that appends lineages
+      --lamAppend :: Integer -> Integer -> Exp (LineageE b1 k)
+
+      {- JSTOLAREK: RESUME HERE ON TUESDAY.  I think the problem lies in incorrect type
+         assigned to variable z.  Currently this is resolved to b1, but I think
+         it should be resolved to `LineageTransform b1 k`.  This might be doable
+         by: 1) changing VarE to actually store a type rather than an explicit
+         dictionary; 2) constructing correct return type explicitly.
+         -}
+
       lamAppend al z = lineageE (lineageDataE (VarE mkReify z))
                         ((lineageProvE (VarE mkReify al)) `lineageAppendE`
                          (lineageProvE (VarE mkReify  z)))
@@ -288,8 +298,9 @@ lineageTransform k (AppE proxy ConcatMap
     • Could not deduce: LineageTransform b1 k ~ b1
         arising from a use of ‘Tuple2E’
       from the context: (a2 ~ (a3 -> [b1], [a3]), a ~ [b1], Reify b1)
+
+    (a -> (LineageE b1 k), Exp [LineageE (LineageTransform b1 k) k] )
 -}
-      -- compLineageApp :: Integer -> Exp [LineageE b1 k]
       compLineageApp al = AppE (proxyLineageApp proxy) Map (TupleConstE
              (Tuple2E (LamE (lamAppend al)) bodyExp))
 
