@@ -279,18 +279,22 @@ lineageTransform k (AppE proxy ConcatMap
       --proxy'' = proxyLineage (proxySnd proxy)
 
       -- lambda that appends lineages
-      --lamAppend :: Integer -> Integer -> Exp (LineageE b1 k)
 
       {- JSTOLAREK: RESUME HERE ON TUESDAY.  I think the problem lies in incorrect type
          assigned to variable z.  Currently this is resolved to b1, but I think
          it should be resolved to `LineageTransform b1 k`.  This might be doable
-         by: 1) changing VarE to actually store a type rather than an explicit
-         dictionary; 2) constructing correct return type explicitly.
+         by constructing correct return type explicitly.
          -}
 
-      lamAppend al z = lineageE (lineageDataE (VarE mkReify z))
+      --lamAppend :: Integer -> Integer -> Exp (LineageE b1 k)
+      lamAppend al z =
+          -- mkReify :: MkReify (b1 -> Type b1)
+          -- JSTOLAREK: work in progress here
+          let reifyTy = let MkReify reify = mkReify
+                        in MkReify $ (\_ -> )
+          in  lineageE (lineageDataE (VarE reifyTy z))
                         ((lineageProvE (VarE mkReify al)) `lineageAppendE`
-                         (lineageProvE (VarE mkReify  z)))
+                         (lineageProvE (VarE reifyTy  z)))
 
       -- comprehension that appends lineages of currently traversed collection
       -- and result of nested part of comprehension
