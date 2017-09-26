@@ -12,6 +12,7 @@ module Database.DSH.Execute
 import           Control.Monad.State
 import qualified Data.HashMap.Strict             as M
 import           Data.List
+import           Data.Proxy
 import qualified Data.Sequence                   as S
 import qualified Data.Vector                     as V
 import           Text.Printf
@@ -85,7 +86,7 @@ execQueryBundle !conn !shape !ty =
         (VShape q lyt, F.ListT ety) -> do
             slyt <- execNested conn' (columnIndexes (rvItemCols q) lyt) ety
             tab  <- execVector conn' q
-            return $! F.ListE (F.MkReify $ \_ -> ety)
+            return $! F.ListE (\Proxy -> ety)
                        (foldl' (vecIter (rvKeyCols q) slyt) S.empty tab)
         -- The query compiler supports only queries that return a list. If the
         -- frontend query returns a scalar value, the query result has been
@@ -106,7 +107,7 @@ execNested !conn lyt ty =
     case (lyt, ty) of
         (CCol i, t)                   -> return $ SCol t i
         (CNest q clyt, F.ListT t) -> do
-            let reify = F.MkReify (\_ -> t)
+            let reify Proxy = t
             clyt' <- execNested conn clyt t
             tab   <- execVector conn q
             return (SNest reify ty (mkSegMap reify (rvKeyCols q) (rvRefCols q) tab clyt'))

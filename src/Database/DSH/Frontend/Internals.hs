@@ -61,7 +61,7 @@ class View a where
 
 newtype Q a = Q (Exp (Rep a))
 
-data DReify a = MkReify (a -> Type a)
+type DReify a = Proxy a -> Type a
 
 --------------------------------------------------------------------------------
 -- Typed frontend ASTs
@@ -259,8 +259,8 @@ unQ (Q e) = e
 toLam :: (QA a, QA b) => (Q a -> Q b) -> Integer -> Exp (Rep b)
 toLam f = unQ . f . Q . (VarE mkReify)
 
-mkReify :: Reify a => DReify a
-mkReify = MkReify reify
+mkReify :: forall a. Reify a => DReify a
+mkReify Proxy = reify (undefined :: a)
 
 -- * Generate Reify instances for tuple types
 mkReifyInstances 16

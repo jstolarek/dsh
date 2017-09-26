@@ -217,8 +217,7 @@ typeLT _ _ = $unimplemented
 
 reifyLT :: forall a k. DReify a -> DReify k
         -> DReify (LineageTransform a k)
-reifyLT (MkReify ra) (MkReify rb) =
-  MkReify (\_ -> typeLT (ra (undefined::a)) (rb (undefined::k)))
+reifyLT ra rb Proxy = typeLT (ra Proxy) (rb Proxy)
 
 lineageTransform :: forall a k. ( Reify a, Typeable k)
                  => DReify k -> Exp a -> Compile (Exp (LineageTransform a k))
@@ -532,12 +531,12 @@ lineageE row lin = TupleConstE (Tuple2E row lin)
 
 -- | Attach empty lineage to a value
 emptyLineageE :: Reify k => Exp a -> Exp (LineageE a k)
-emptyLineageE a = TupleConstE (Tuple2E a (ListE (MkReify reify) (S.empty)))
+emptyLineageE a = TupleConstE (Tuple2E a (ListE mkReify (S.empty)))
 
 -- | Lineage annotation constructor
 lineageAnnotE :: DReify k -> Text -> Exp k -> Exp (LineageAnnotE k)
-lineageAnnotE (MkReify reifyK) table_name key =
-    singletonE (MkReify $ \_ -> TupleT $ Tuple2T TextT (reifyK undefined)) (TupleConstE (Tuple2E (TextE table_name) key))
+lineageAnnotE reifyK table_name key =
+    singletonE (\Proxy -> TupleT $ Tuple2T TextT (reifyK Proxy)) (TupleConstE (Tuple2E (TextE table_name) key))
 
 -- | Append two lineage annotations
 lineageAppendE :: Exp (LineageAnnotE k) -> Exp (LineageAnnotE k)
@@ -562,7 +561,7 @@ lineageProvE = AppE Proxy (TupElem Tup2_2)
 --
 emptyLineageLamE :: forall a k. (Reify a, Reify k)
                  => Integer -> Exp (LineageE a k)
-emptyLineageLamE x = emptyLineageE (VarE (MkReify reify) x)
+emptyLineageLamE x = emptyLineageE (VarE mkReify x)
 
 -- | Add empty lineage to all elements in a list:
 --
