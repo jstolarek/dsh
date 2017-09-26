@@ -184,11 +184,9 @@ lineage :: forall a k.
         => Proxy k -> Q a -> Q (LT a k)
 lineage pk (Q a) =
    let pa  = Proxy :: Proxy a
-       prk = Proxy :: Proxy (Rep k)
-   in Q (castWith (apply Refl (ltEq pa pk)) (runLineage (lineageTransform prk a)))
+   in Q (castWith (apply Refl (ltEq pa pk)) (runLineage (lineageTransform (mkReify :: DReify (Rep k)) a)))
 
-typeLT :: forall a k. Reify k
-       => Type a -> Type k -> Type (LineageTransform a k)
+typeLT :: forall a k. Type a -> Type k -> Type (LineageTransform a k)
 typeLT (UnitT)          _ = UnitT
 typeLT (BoolT)          _ = BoolT
 typeLT (CharT)          _ = CharT
@@ -217,28 +215,29 @@ typeLT _ _ = $unimplemented
 
 
 
-reifyLT :: forall a k. (Reify k) => DReify a -> DReify k
+reifyLT :: forall a k. DReify a -> DReify k
         -> DReify (LineageTransform a k)
 reifyLT (MkReify ra) (MkReify rb) =
   MkReify (\_ -> typeLT (ra (undefined::a)) (rb (undefined::k)))
 
-lineageTransform :: forall a k. ( Reify a, Reify k, Typeable k
-                                , Reify (LineageTransform a k))
-                 => Proxy k -> Exp a -> Compile (Exp (LineageTransform a k))
-lineageTransform proxy t@(TableE (TableDB name _ _) keyProj) = do
+lineageTransform :: forall a k. ( Reify a, Typeable k)
+                 => DReify k -> Exp a -> Compile (Exp (LineageTransform a k))
+lineageTransform reifyK t@(TableE (TableDB name _ _) keyProj) = do
   let -- We have to perform runtime type equality to check that type of lineage
       -- key specified in a call to `lineage` matches the type returned by
       -- `keyProj` function stored in `TableE` constructor.
       keyEquality :: forall k1 k2. (Typeable k1, Typeable k2)
-                  => Proxy k1 -> (Integer -> Exp k2) -> Maybe (k1 :~: k2)
+                  => DReify k1 -> (Integer -> Exp k2) -> Maybe (k1 :~: k2)
       keyEquality _ _ = eqT
-  case keyEquality proxy keyProj of
+  case keyEquality reifyK keyProj of
     Just Refl -> do
       let lam :: DReify b -> Integer -> Exp (LineageE b k)
           lam dreify a = lineageE (VarE dreify a)
-                     (lineageAnnotE (pack name) (keyProj a :: Exp k))
-      return (AppE Proxy Map (TupleConstE (Tuple2E (LamE (lam (reifyLT mkReify (mkReify :: DReify k)))) t)))
+                     (lineageAnnotE reifyK (pack name) (keyProj a :: Exp k))
+      return (AppE Proxy Map (TupleConstE (Tuple2E (LamE (lam (reifyLT mkReify reifyK))) t)))
     Nothing -> $impossible
+
+{-
 
 {-
       ‘b1’ is a rigid type variable bound by
@@ -331,6 +330,8 @@ type LineageAnnotE k = [(Text, k)]
                                    (VarE mkReify al)))))
   return (AppE Proxy
                ConcatMap (TupleConstE (Tuple2E (LamE compSingOrg) tbl')))
+
+-}
 
 {-
 lineageTransform k (AppE proxy Map
@@ -534,9 +535,9 @@ emptyLineageE :: Reify k => Exp a -> Exp (LineageE a k)
 emptyLineageE a = TupleConstE (Tuple2E a (ListE (MkReify reify) (S.empty)))
 
 -- | Lineage annotation constructor
-lineageAnnotE :: Reify k => Text -> Exp k -> Exp (LineageAnnotE k)
-lineageAnnotE table_name key =
-    singletonE (TupleConstE (Tuple2E (TextE table_name) key))
+lineageAnnotE :: DReify k -> Text -> Exp k -> Exp (LineageAnnotE k)
+lineageAnnotE (MkReify reifyK) table_name key =
+    singletonE (MkReify $ \_ -> TupleT $ Tuple2T TextT (reifyK undefined)) (TupleConstE (Tuple2E (TextE table_name) key))
 
 -- | Append two lineage annotations
 lineageAppendE :: Exp (LineageAnnotE k) -> Exp (LineageAnnotE k)
@@ -544,8 +545,8 @@ lineageAppendE :: Exp (LineageAnnotE k) -> Exp (LineageAnnotE k)
 lineageAppendE a b = AppE Proxy Append (pairE a b)
 
 -- | Construct a singleton list
-singletonE :: Reify a => Exp a -> Exp [a]
-singletonE = ListE (MkReify reify) . S.singleton
+singletonE :: DReify a -> Exp a -> Exp [a]
+singletonE reify = ListE reify . S.singleton
 
 -- | Extract data from a lineage-annotated row
 lineageDataE :: Exp (LineageE a k) -> Exp a
