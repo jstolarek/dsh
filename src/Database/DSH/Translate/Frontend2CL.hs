@@ -82,7 +82,7 @@ translate (ListE reifyTy es) = do
 -- concatMap, sortWith, ...). If lambdas occur in other places that
 -- have not been eliminated by inlining in the frontend, additional
 -- normalization rules or defunctionalization should be employed.
-translate (LamE _) = $impossible
+translate (LamE _ _) = $impossible
 translate (TableE t _) =
     -- Reify the type of the table expression
     let ty  = reify (undefined :: a)
@@ -142,7 +142,7 @@ translateApp f args =
        -- Map to a comprehension
        Map          ->
            case args of
-               TupleConstE (Tuple2E (LamE lam) xs) -> do
+               TupleConstE (Tuple2E (LamE _ lam) xs) -> do
                    xs'                 <- translate xs
                    (boundVar, bodyExp) <- lamBody lam
                    bodyExp'            <- translate bodyExp
@@ -152,7 +152,7 @@ translateApp f args =
        -- Map to a comprehension and concat
        ConcatMap    ->
            case args of
-               TupleConstE (Tuple2E (LamE lam) xs) -> do
+               TupleConstE (Tuple2E (LamE _ lam) xs) -> do
                    xs'                 <- translate xs
                    (boundVar, bodyExp) <- lamBody lam
                    bodyExp'            <- translate bodyExp
@@ -163,7 +163,7 @@ translateApp f args =
        -- sortWith (\x -> f x) xs => sort [ (x, f x) | x <- xs ]
        SortWith     ->
            case args of
-               TupleConstE (Tuple2E (LamE lam) xs) -> do
+               TupleConstE (Tuple2E (LamE _ lam) xs) -> do
                    xs'                  <- translate xs
                    -- Get a FOAS representation of the lambda
                    (boundName, sortExp) <- lamBody lam
@@ -178,7 +178,7 @@ translateApp f args =
        -- Map to a comprehension with a guard
        Filter       ->
            case args of
-               TupleConstE (Tuple2E (LamE lam) xs) -> do
+               TupleConstE (Tuple2E (LamE _ lam) xs) -> do
                    xs'                 <- translate xs
                    (boundVar, bodyExp) <- lamBody lam
                    bodyExp'            <- translate bodyExp
@@ -191,7 +191,7 @@ translateApp f args =
        -- groupWithKey (\x -> f x) xs => group [ (x, f x) | x <- xs ]
        GroupWithKey ->
            case args of
-               TupleConstE (Tuple2E (LamE lam) xs) -> do
+               TupleConstE (Tuple2E (LamE _ lam) xs) -> do
                    xs'                   <- translate xs
                    (boundName, groupExp) <- lamBody lam
                    groupExp'             <- translate groupExp

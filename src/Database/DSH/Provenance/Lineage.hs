@@ -184,7 +184,9 @@ lineage :: forall a k.
         => Proxy k -> Q a -> Q (LT a k)
 lineage pk (Q a) =
    let pa  = Proxy :: Proxy a
-   in Q (castWith (apply Refl (ltEq pa pk)) (runLineage (lineageTransform (mkReify :: DReify (Rep k)) a)))
+   in Q (castWith (apply Refl (ltEq pa pk))
+                  (runLineage (lineageTransform mkReify
+                                               (mkReify :: DReify (Rep k)) a)))
 
 typeLT :: forall a k. Type a -> Type k -> Type (LineageTransform a k)
 typeLT (UnitT)          _ = UnitT
@@ -214,14 +216,13 @@ typeLT (TupleT (Tuple4T a b c d)) kt = TupleT (Tuple4T
 typeLT _ _ = $unimplemented
 
 
-
-reifyLT :: forall a k. DReify a -> DReify k
-        -> DReify (LineageTransform a k)
+reifyLT :: forall a k. DReify a -> DReify k -> DReify (LineageTransform a k)
 reifyLT ra rb Proxy = typeLT (ra Proxy) (rb Proxy)
 
-lineageTransform :: forall a k. ( Reify a, Typeable k)
-                 => DReify k -> Exp a -> Compile (Exp (LineageTransform a k))
-lineageTransform reifyK t@(TableE (TableDB name _ _) keyProj) = do
+lineageTransform :: forall a k. Typeable k
+                 => DReify a -> DReify k -> Exp a
+                 -> Compile (Exp (LineageTransform a k))
+lineageTransform reifyA reifyK t@(TableE (TableDB name _ _) keyProj) = do
   let -- We have to perform runtime type equality to check that type of lineage
       -- key specified in a call to `lineage` matches the type returned by
       -- `keyProj` function stored in `TableE` constructor.
@@ -233,11 +234,13 @@ lineageTransform reifyK t@(TableE (TableDB name _ _) keyProj) = do
       let lam :: DReify b -> Integer -> Exp (LineageE b k)
           lam dreify a = lineageE (VarE dreify a)
                      (lineageAnnotE reifyK (pack name) (keyProj a :: Exp k))
-      return (AppE Proxy Map (TupleConstE (Tuple2E (LamE (lam (reifyLT mkReify reifyK))) t)))
+          reifyC Proxy = case reifyA Proxy of
+                           ListT t -> t
+                           _       -> $impossible
+      return (AppE Proxy Map (TupleConstE (Tuple2E (LamE reifyC (lam (reifyLT mkReify reifyK))) t)))
     Nothing -> $impossible
 
 {-
-
 {-
       ‘b1’ is a rigid type variable bound by
         a pattern with constructor:
@@ -245,21 +248,21 @@ lineageTransform reifyK t@(TableE (TableDB name _ _) keyProj) = do
 
       proxy :: Proxy (a1 -> [b1], [a1])
 -}
-lineageTransform k (AppE proxy ConcatMap
+lineageTransform reifyA reifyK (AppE proxy ConcatMap
 {-
   t10 ~ (a4 -> b)
         bound by a pattern with constructor:
                    LamE :: forall b a1. (Integer -> Exp b) -> Exp (a1 -> b),
 -}
-                    (TupleConstE (Tuple2E (LamE lam) tbl))) = do
+                    (TupleConstE (Tuple2E (LamE reifyC lam) tbl))) = do
 
   -- translate the comprehension generator
   -- tbl' :: Exp [LineageE (LineageTransform a4 k) k]
-  tbl' <- lineageTransform k tbl
+  tbl' <- lineageTransform reifyC reifyK tbl
   -- saturate the lambda and translate the resulting expression
   boundVar <- freshVar
   --  bodyExp :: Exp [LineageE (LineageTransform b1 k) k]
-  bodyExp  <- lineageTransform k (lam boundVar)
+  bodyExp  <- lineageTransform undefined reifyK (lam boundVar)
 
   let -- Specialized proxy transformers
       --proxyRes :: Proxy (x -> [y], [x]) -> Proxy [y]
@@ -294,13 +297,10 @@ type LineageAnnotE k = [(Text, k)]
       lamAppend al z =
           -- mkReify :: MkReify (b1 -> Type b1)
           -- JSTOLAREK: work in progress here
-          let -- reifyTy :: DReify (b1, [(Text, k)])
-              -- reifyTy :: DReify (LineageTransform b1 k, [(Text, k)])
-              reifyTy = let MkReify reify  =  mkReify -- reify: b1 -> Type b1
-                            MkReify reifyK = (mkReify :: DReify k)
-                        in MkReify $ (\_ -> TupleT (Tuple2T (typeLT (reify undefined) (reifyK undefined)) (ListT (TupleT $ Tuple2T TextT (reifyK undefined)))))
+          let reifyTy Proxy = let reify  =  mkReify -- reify: b1 -> Type b1
+                        in TupleT (Tuple2T (typeLT (reify undefined) (reifyK undefined)) (ListT (TupleT $ Tuple2T TextT (reifyK undefined))))
           in  lineageE (lineageDataE (VarE reifyTy z))
-                        ((lineageProvE (VarE mkReify al)) `lineageAppendE`
+                        ((lineageProvE (VarE undefined al)) `lineageAppendE`
                          (lineageProvE (VarE reifyTy  z)))
 
       -- comprehension that appends lineages of currently traversed collection
@@ -325,13 +325,11 @@ type LineageAnnotE k = [(Text, k)]
 
       compSingOrg al = AppE (proxySingOrg proxy) ConcatMap (TupleConstE
              (Tuple2E (LamE (\a -> subst a boundVar (compLineageApp al)))
-                      (singletonE (lineageDataE
-                                   (VarE mkReify al)))))
+                      (singletonE undefined (lineageDataE
+                                   (VarE undefined al)))))
   return (AppE Proxy
                ConcatMap (TupleConstE (Tuple2E (LamE compSingOrg) tbl')))
-
 -}
-
 {-
 lineageTransform k (AppE proxy Map
                     (TupleConstE (Tuple2E (LamE lam) tbl))) = do
@@ -536,7 +534,8 @@ emptyLineageE a = TupleConstE (Tuple2E a (ListE mkReify (S.empty)))
 -- | Lineage annotation constructor
 lineageAnnotE :: DReify k -> Text -> Exp k -> Exp (LineageAnnotE k)
 lineageAnnotE reifyK table_name key =
-    singletonE (\Proxy -> TupleT $ Tuple2T TextT (reifyK Proxy)) (TupleConstE (Tuple2E (TextE table_name) key))
+    singletonE (\Proxy -> TupleT $ Tuple2T TextT (reifyK Proxy))
+               (TupleConstE (Tuple2E (TextE table_name) key))
 
 -- | Append two lineage annotations
 lineageAppendE :: Exp (LineageAnnotE k) -> Exp (LineageAnnotE k)
@@ -569,7 +568,7 @@ emptyLineageLamE x = emptyLineageE (VarE mkReify x)
 --
 emptyLineageListE :: (Reify a, Reify k) => Exp [a] -> Exp [LineageE a k]
 emptyLineageListE e =
-    AppE Proxy Map (TupleConstE (Tuple2E (LamE emptyLineageLamE) e))
+    AppE Proxy Map (TupleConstE (Tuple2E (LamE mkReify emptyLineageLamE) e))
 
 
 --------------------------------------------------------------------------------
@@ -616,7 +615,7 @@ subst _ _ (ScientificE s) = ScientificE s
 subst _ _ (DayE d)        = DayE d
 subst x v (ListE r l)     = ListE r (fmap (subst x v) l)
 subst x v (AppE p f e)    = AppE p f (subst x v e)
-subst x v (LamE f)        = LamE (\y -> subst x v (f y))
+subst x v (LamE r f)      = LamE r (\y -> subst x v (f y))
 subst _ _ (TableE t k)    = TableE t k
 subst x v (TupleConstE t) =
     let substTuple :: TupleConst a -> TupleConst a

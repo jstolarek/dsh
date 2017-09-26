@@ -139,7 +139,7 @@ data Exp a where
     DayE        :: !Day     -> Exp Day
     ListE       :: DReify a -> !(S.Seq (Exp a)) -> Exp [a]
     AppE        :: Proxy a -> Fun a b -> Exp a -> Exp b
-    LamE        :: (Integer -> Exp b) -> Exp (a -> b)
+    LamE        :: DReify a -> (Integer -> Exp b) -> Exp (a -> b)
     VarE        :: DReify a -> Integer -> Exp a
     TableE      :: (Reify a, Typeable k)
                 => Table -> (Integer -> Exp k) -> Exp [a]

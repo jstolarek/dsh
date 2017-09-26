@@ -598,7 +598,7 @@ drop :: (QA a) => Q Integer -> Q [a] -> Q [a]
 drop i xs = map fst $ filter (\xp -> snd xp > i) $ number xs
 
 map :: (QA a,QA b) => (Q a -> Q b) ->  Q [a] -> Q [b]
-map f (Q as) = Q (AppE Proxy Map (pairE (LamE (toLam f)) as))
+map f (Q as) = Q (AppE Proxy Map (pairE (LamE mkReify (toLam f)) as))
 
 append :: (QA a) => Q [a] -> Q [a] -> Q [a]
 append (Q as) (Q bs) = Q (AppE Proxy Append (pairE as bs))
@@ -607,12 +607,12 @@ append (Q as) (Q bs) = Q (AppE Proxy Append (pairE as bs))
 (++) = append
 
 filter :: (QA a) => (Q a -> Q Bool) -> Q [a] -> Q [a]
-filter f (Q as) = Q (AppE Proxy Filter (pairE (LamE (toLam f)) as))
+filter f (Q as) = Q (AppE Proxy Filter (pairE (LamE mkReify (toLam f)) as))
 
 -- | Partition a list into groups according to the supplied projection
 -- function.
 groupWithKey :: (QA a,QA b,Ord b, TA b) => (Q a -> Q b) -> Q [a] -> Q [(b,[a])]
-groupWithKey f (Q as) = Q (AppE Proxy GroupWithKey (pairE (LamE (toLam f)) as))
+groupWithKey f (Q as) = Q (AppE Proxy GroupWithKey (pairE (LamE mkReify (toLam f)) as))
 
 groupWith :: (QA a,QA b,Ord b, TA b) => (Q a -> Q b) -> Q [a] -> Q [[a]]
 groupWith f as = map snd (groupWithKey f as)
@@ -629,7 +629,7 @@ groupAggr k p agg as =
 
 
 sortWith :: (QA a,QA b,Ord b, TA b) => (Q a -> Q b) -> Q [a] -> Q [a]
-sortWith f (Q as) = Q (AppE Proxy SortWith (pairE (LamE (toLam f)) as))
+sortWith f (Q as) = Q (AppE Proxy SortWith (pairE (LamE mkReify (toLam f)) as))
 
 null :: (QA a) => Q [a] -> Q Bool
 null (Q as) = Q (AppE Proxy Null as)
@@ -673,7 +673,7 @@ concat :: (QA a) => Q [[a]] -> Q [a]
 concat (Q ass) = Q (AppE Proxy Concat ass)
 
 concatMap :: (QA a,QA b) => (Q a -> Q [b]) -> Q [a] -> Q [b]
-concatMap f (Q as) = Q (AppE Proxy ConcatMap (pairE (LamE (toLam f)) as))
+concatMap f (Q as) = Q (AppE Proxy ConcatMap (pairE (LamE mkReify (toLam f)) as))
 
 maximum :: (QA a,Ord a,TA a) => Q [a] -> Q a
 maximum (Q as) = Q (AppE Proxy Maximum as)
