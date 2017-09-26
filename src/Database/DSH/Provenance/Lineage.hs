@@ -295,6 +295,23 @@ lineageTransform reifyA reifyK (AppE ConcatMap
   return (AppE ConcatMap (TupleConstE (Tuple2E
                                        (LamE reifyTy'' compSingOrg) tbl')))
 
+-- L(xs ++ ys) = L(xs) ++ L(ys)
+lineageTransform reifyA reifyK (AppE Append (TupleConstE (Tuple2E xs ys))) =
+    do xs' <- lineageTransform reifyA reifyK xs
+       ys' <- lineageTransform reifyA reifyK ys
+       return (AppE Append (TupleConstE (Tuple2E xs' ys')))
+
+-- constants
+lineageTransform _ _ e@(UnitE)         = return e
+lineageTransform _ _ e@(BoolE       _) = return e
+lineageTransform _ _ e@(CharE       _) = return e
+lineageTransform _ _ e@(IntegerE    _) = return e
+lineageTransform _ _ e@(DoubleE     _) = return e
+lineageTransform _ _ e@(TextE       _) = return e
+lineageTransform _ _ e@(DayE        _) = return e
+lineageTransform _ _ e@(ScientificE _) = return e
+lineageTransform _ _ e@(DecimalE    _) = return e
+
 {-
 lineageTransform k (AppE proxy Map
                     (TupleConstE (Tuple2E (LamE lam) tbl))) = do
@@ -355,23 +372,6 @@ lineageTransform k e@(AppE _ Guard b) = do
 lineageTransform _ e@(AppE _ Guard _) = return (emptyLineageListE e)
 lineageTransform _ e@(AppE _ Cons (TupleConstE (Tuple2E _ _))) =
   return (emptyLineageListE e)
-
--- constants
-lineageTransform _    UnitE          = return (emptyLineageE UnitE)
-lineageTransform _ e@(BoolE       _) = return (emptyLineageE e)
-lineageTransform _ e@(CharE       _) = return (emptyLineageE e)
-lineageTransform _ e@(IntegerE    _) = return (emptyLineageE e)
-lineageTransform _ e@(DoubleE     _) = return (emptyLineageE e)
-lineageTransform _ e@(TextE       _) = return (emptyLineageE e)
-lineageTransform _ e@(DayE        _) = return (emptyLineageE e)
-lineageTransform _ e@(ScientificE _) = return (emptyLineageE e)
-lineageTransform _ e@(DecimalE    _) = return (emptyLineageE e)
-
--- L(xs ++ ys) = L(xs) ++ L(ys)
-lineageTransform k (AppE _ Append (TupleConstE (Tuple2E xs ys))) = do
-  xs' <- lineageTransform k xs
-  ys' <- lineageTransform k ys
-  return (AppE Proxy Append (TupleConstE (Tuple2E xs' ys')))
 
 -- L(reverse xs) = reverse (L(xs))
 lineageTransform k (AppE _ Reverse xs) = do
