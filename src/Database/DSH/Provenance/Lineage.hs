@@ -241,7 +241,6 @@ lineageTransform reifyA reifyK t@(TableE (TableDB name _ _) keyProj) = do
     Nothing -> $impossible
 
 {-
-{-
       ‘b1’ is a rigid type variable bound by
         a pattern with constructor:
           ConcatMap :: forall b1 a1. Reify b1 => Fun (a1 -> [b1], [a1]) [b1],
@@ -258,11 +257,12 @@ lineageTransform reifyA reifyK (AppE proxy ConcatMap
 
   -- translate the comprehension generator
   -- tbl' :: Exp [LineageE (LineageTransform a4 k) k]
-  tbl' <- lineageTransform reifyC reifyK tbl
+  let reifyCs Proxy = ListT (reifyC Proxy)
+  tbl' <- lineageTransform reifyCs reifyK tbl
   -- saturate the lambda and translate the resulting expression
   boundVar <- freshVar
   --  bodyExp :: Exp [LineageE (LineageTransform b1 k) k]
-  bodyExp  <- lineageTransform undefined reifyK (lam boundVar)
+  bodyExp  <- lineageTransform reifyA reifyK (lam boundVar)
 
   let -- Specialized proxy transformers
       --proxyRes :: Proxy (x -> [y], [x]) -> Proxy [y]
@@ -274,6 +274,18 @@ lineageTransform reifyA reifyK (AppE proxy ConcatMap
 
       proxySingOrg :: Proxy (x -> [y], [x]) -> Proxy (x -> [LineageE (LineageTransform y k) k], [x])
       proxySingOrg Proxy = Proxy
+
+      reifyTy Proxy = case reifyA Proxy of
+                        ListT t -> TupleT (Tuple2T (typeLT t (reifyK Proxy)) (ListT (TupleT $ Tuple2T TextT (reifyK Proxy))))
+                        _       -> $impossible
+
+      reifyTy' Proxy = case reifyA Proxy of
+                        ListT t -> typeLT t (reifyK Proxy)
+                        _       -> $impossible
+
+      reifyTy'' Proxy = case reifyC Proxy of
+                        t -> TupleT (Tuple2T (typeLT t (reifyK Proxy)) (ListT (TupleT $ Tuple2T TextT (reifyK Proxy))))
+
 
       -- proxies needed to guide variable types
       --proxy'  = proxyLineage (proxyElem (proxyRes proxy))
@@ -297,10 +309,8 @@ type LineageAnnotE k = [(Text, k)]
       lamAppend al z =
           -- mkReify :: MkReify (b1 -> Type b1)
           -- JSTOLAREK: work in progress here
-          let reifyTy Proxy = let reify  =  mkReify -- reify: b1 -> Type b1
-                        in TupleT (Tuple2T (typeLT (reify undefined) (reifyK undefined)) (ListT (TupleT $ Tuple2T TextT (reifyK undefined))))
-          in  lineageE (lineageDataE (VarE reifyTy z))
-                        ((lineageProvE (VarE undefined al)) `lineageAppendE`
+             lineageE (lineageDataE (VarE reifyTy z))
+                        ((lineageProvE (VarE reifyTy al)) `lineageAppendE`
                          (lineageProvE (VarE reifyTy  z)))
 
       -- comprehension that appends lineages of currently traversed collection
@@ -314,7 +324,7 @@ type LineageAnnotE k = [(Text, k)]
 -}
       --compLineageApp :: Integer -> Exp [LineageE (LineageTransform b1 k) k]
       compLineageApp al = AppE Proxy Map (TupleConstE
-             (Tuple2E (LamE (lamAppend al)) bodyExp))
+             (Tuple2E (LamE reifyTy (lamAppend al)) bodyExp))
 
       -- comprehension over singleton list containing data originally assigned
       -- to comprehension binder
@@ -323,13 +333,12 @@ type LineageAnnotE k = [(Text, k)]
                        (compLineageApp al)
 -}
 
-      compSingOrg al = AppE (proxySingOrg proxy) ConcatMap (TupleConstE
-             (Tuple2E (LamE (\a -> subst a boundVar (compLineageApp al)))
-                      (singletonE undefined (lineageDataE
-                                   (VarE undefined al)))))
+      compSingOrg al = AppE Proxy ConcatMap (TupleConstE
+             (Tuple2E (LamE reifyTy' (\a -> subst a boundVar (compLineageApp al)))
+                      (singletonE reifyTy' (lineageDataE
+                                   (VarE reifyTy al)))))
   return (AppE Proxy
-               ConcatMap (TupleConstE (Tuple2E (LamE compSingOrg) tbl')))
--}
+               ConcatMap (TupleConstE (Tuple2E (LamE reifyTy'' compSingOrg) tbl')))
 {-
 lineageTransform k (AppE proxy Map
                     (TupleConstE (Tuple2E (LamE lam) tbl))) = do

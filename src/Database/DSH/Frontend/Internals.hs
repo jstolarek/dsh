@@ -103,7 +103,7 @@ data Fun a b where
     Cons             :: Fun (a,[a]) [a]
     Zip              :: Fun ([a],[b]) [(a,b)]
     Map              :: Fun (a -> b,[a]) [b]
-    ConcatMap        :: Reify b => Fun (a -> [b],[a]) [b]
+    ConcatMap        :: Fun (a -> [b],[a]) [b]
     Filter           :: Fun (a -> Bool,[a]) [a]
     GroupWithKey     :: Fun (a -> b,[a]) [(b, [a])]
     SortWith         :: Fun (a -> b,[a]) [a]
