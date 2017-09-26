@@ -271,7 +271,7 @@ lineageTransform k (AppE proxy ConcatMap
                       -> Proxy (LineageE y k -> LineageE y k, [LineageE y k])
       proxyLineageApp Proxy = Proxy
 
-      proxySingOrg :: Proxy (x -> [y], [x]) -> Proxy (x -> [LineageE y k], [x])
+      proxySingOrg :: Proxy (x -> [y], [x]) -> Proxy (x -> [LineageE (LineageTransform y k) k], [x])
       proxySingOrg Proxy = Proxy
 
       -- proxies needed to guide variable types
@@ -284,14 +284,23 @@ lineageTransform k (AppE proxy ConcatMap
          assigned to variable z.  Currently this is resolved to b1, but I think
          it should be resolved to `LineageTransform b1 k`.  This might be doable
          by constructing correct return type explicitly.
+
+type LineageE a k = (a, LineageAnnotE k)
+
+type LineageAnnotE k = [(Text, k)]
+
          -}
 
       --lamAppend :: Integer -> Integer -> Exp (LineageE b1 k)
+      -- lamAppend :: Integer -> Integer -> Exp (LineageE (LineageTransform b1 k) k)
       lamAppend al z =
           -- mkReify :: MkReify (b1 -> Type b1)
           -- JSTOLAREK: work in progress here
-          let reifyTy = let MkReify reify = mkReify
-                        in MkReify $ (\_ -> )
+          let -- reifyTy :: DReify (b1, [(Text, k)])
+              -- reifyTy :: DReify (LineageTransform b1 k, [(Text, k)])
+              reifyTy = let MkReify reify  =  mkReify -- reify: b1 -> Type b1
+                            MkReify reifyK = (mkReify :: DReify k)
+                        in MkReify $ (\_ -> TupleT (Tuple2T (typeLT (reify undefined) (reifyK undefined)) (ListT (TupleT $ Tuple2T TextT (reifyK undefined)))))
           in  lineageE (lineageDataE (VarE reifyTy z))
                         ((lineageProvE (VarE mkReify al)) `lineageAppendE`
                          (lineageProvE (VarE reifyTy  z)))
@@ -305,7 +314,8 @@ lineageTransform k (AppE proxy ConcatMap
 
     (a -> (LineageE b1 k), Exp [LineageE (LineageTransform b1 k) k] )
 -}
-      compLineageApp al = AppE (proxyLineageApp proxy) Map (TupleConstE
+      --compLineageApp :: Integer -> Exp [LineageE (LineageTransform b1 k) k]
+      compLineageApp al = AppE Proxy Map (TupleConstE
              (Tuple2E (LamE (lamAppend al)) bodyExp))
 
       -- comprehension over singleton list containing data originally assigned
