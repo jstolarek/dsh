@@ -237,7 +237,8 @@ lineageTransform reifyA reifyK tbl@(TableE (TableDB name _ _) keyProj) = do
           reifyC Proxy = case reifyA Proxy of
                            ListT t -> t
                            _       -> $impossible
-      return (AppE Map (TupleConstE (Tuple2E (LamE reifyC (lam (reifyLT mkReify reifyK))) tbl)))
+      return (AppE Map (TupleConstE (Tuple2E
+                        (LamE reifyC (lam (reifyLT mkReify reifyK))) tbl)))
     Nothing -> $impossible
 
 lineageTransform reifyA reifyK (AppE ConcatMap
@@ -287,10 +288,12 @@ lineageTransform reifyA reifyK (AppE ConcatMap
 -}
 
       compSingOrg al = AppE ConcatMap (TupleConstE
-             (Tuple2E (LamE reifyTy' (\a -> subst a boundVar (compLineageApp al)))
+             (Tuple2E (LamE reifyTy'
+                            (\a -> subst a boundVar (compLineageApp al)))
                       (singletonE reifyTy' (lineageDataE
                                    (VarE reifyTy al)))))
-  return (AppE ConcatMap (TupleConstE (Tuple2E (LamE reifyTy'' compSingOrg) tbl')))
+  return (AppE ConcatMap (TupleConstE (Tuple2E
+                                       (LamE reifyTy'' compSingOrg) tbl')))
 
 {-
 lineageTransform k (AppE proxy Map
