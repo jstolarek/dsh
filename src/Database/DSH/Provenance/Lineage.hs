@@ -222,7 +222,7 @@ reifyLT ra rb Proxy = typeLT (ra Proxy) (rb Proxy)
 lineageTransform :: forall a k. Typeable k
                  => DReify a -> DReify k -> Exp a
                  -> Compile (Exp (LineageTransform a k))
-lineageTransform reifyA reifyK t@(TableE (TableDB name _ _) keyProj) = do
+lineageTransform reifyA reifyK tbl@(TableE (TableDB name _ _) keyProj) = do
   let -- We have to perform runtime type equality to check that type of lineage
       -- key specified in a call to `lineage` matches the type returned by
       -- `keyProj` function stored in `TableE` constructor.
@@ -237,23 +237,11 @@ lineageTransform reifyA reifyK t@(TableE (TableDB name _ _) keyProj) = do
           reifyC Proxy = case reifyA Proxy of
                            ListT t -> t
                            _       -> $impossible
-      return (AppE Proxy Map (TupleConstE (Tuple2E (LamE reifyC (lam (reifyLT mkReify reifyK))) t)))
+      return (AppE Proxy Map (TupleConstE (Tuple2E (LamE reifyC (lam (reifyLT mkReify reifyK))) tbl)))
     Nothing -> $impossible
 
-{-
-      ‘b1’ is a rigid type variable bound by
-        a pattern with constructor:
-          ConcatMap :: forall b1 a1. Reify b1 => Fun (a1 -> [b1], [a1]) [b1],
-
-      proxy :: Proxy (a1 -> [b1], [a1])
--}
-lineageTransform reifyA reifyK (AppE proxy ConcatMap
-{-
-  t10 ~ (a4 -> b)
-        bound by a pattern with constructor:
-                   LamE :: forall b a1. (Integer -> Exp b) -> Exp (a1 -> b),
--}
-                    (TupleConstE (Tuple2E (LamE reifyC lam) tbl))) = do
+lineageTransform reifyA reifyK (AppE Proxy ConcatMap
+                   (TupleConstE (Tuple2E (LamE reifyC lam) tbl))) = do
 
   -- translate the comprehension generator
   -- tbl' :: Exp [LineageE (LineageTransform a4 k) k]
@@ -264,65 +252,30 @@ lineageTransform reifyA reifyK (AppE proxy ConcatMap
   --  bodyExp :: Exp [LineageE (LineageTransform b1 k) k]
   bodyExp  <- lineageTransform reifyA reifyK (lam boundVar)
 
-  let -- Specialized proxy transformers
-      --proxyRes :: Proxy (x -> [y], [x]) -> Proxy [y]
-      --proxyRes Proxy = Proxy
+  let lineageRecTy :: Type c -> Type (LineageTransform c k)
+      lineageRecTy t = typeLT t (reifyK Proxy)
 
-      proxyLineageApp :: Proxy (x -> [y], [x])
-                      -> Proxy (LineageE y k -> LineageE y k, [LineageE y k])
-      proxyLineageApp Proxy = Proxy
-
-      proxySingOrg :: Proxy (x -> [y], [x]) -> Proxy (x -> [LineageE (LineageTransform y k) k], [x])
-      proxySingOrg Proxy = Proxy
+      annotTy = ListT (TupleT $ Tuple2T TextT (reifyK Proxy))
 
       reifyTy Proxy = case reifyA Proxy of
-                        ListT t -> TupleT (Tuple2T (typeLT t (reifyK Proxy)) (ListT (TupleT $ Tuple2T TextT (reifyK Proxy))))
+                        ListT t -> TupleT (Tuple2T (lineageRecTy t) annotTy)
                         _       -> $impossible
 
       reifyTy' Proxy = case reifyA Proxy of
-                        ListT t -> typeLT t (reifyK Proxy)
+                        ListT t -> lineageRecTy t
                         _       -> $impossible
 
       reifyTy'' Proxy = case reifyC Proxy of
-                        t -> TupleT (Tuple2T (typeLT t (reifyK Proxy)) (ListT (TupleT $ Tuple2T TextT (reifyK Proxy))))
-
-
-      -- proxies needed to guide variable types
-      --proxy'  = proxyLineage (proxyElem (proxyRes proxy))
-      --proxy'' = proxyLineage (proxySnd proxy)
+                        t -> TupleT (Tuple2T (lineageRecTy t) annotTy)
 
       -- lambda that appends lineages
-
-      {- JSTOLAREK: RESUME HERE ON TUESDAY.  I think the problem lies in incorrect type
-         assigned to variable z.  Currently this is resolved to b1, but I think
-         it should be resolved to `LineageTransform b1 k`.  This might be doable
-         by constructing correct return type explicitly.
-
-type LineageE a k = (a, LineageAnnotE k)
-
-type LineageAnnotE k = [(Text, k)]
-
-         -}
-
-      --lamAppend :: Integer -> Integer -> Exp (LineageE b1 k)
-      -- lamAppend :: Integer -> Integer -> Exp (LineageE (LineageTransform b1 k) k)
       lamAppend al z =
-          -- mkReify :: MkReify (b1 -> Type b1)
-          -- JSTOLAREK: work in progress here
              lineageE (lineageDataE (VarE reifyTy z))
                         ((lineageProvE (VarE reifyTy al)) `lineageAppendE`
                          (lineageProvE (VarE reifyTy  z)))
 
       -- comprehension that appends lineages of currently traversed collection
       -- and result of nested part of comprehension
-{-
-    • Could not deduce: LineageTransform b1 k ~ b1
-        arising from a use of ‘Tuple2E’
-      from the context: (a2 ~ (a3 -> [b1], [a3]), a ~ [b1], Reify b1)
-
-    (a -> (LineageE b1 k), Exp [LineageE (LineageTransform b1 k) k] )
--}
-      --compLineageApp :: Integer -> Exp [LineageE (LineageTransform b1 k) k]
       compLineageApp al = AppE Proxy Map (TupleConstE
              (Tuple2E (LamE reifyTy (lamAppend al)) bodyExp))
 
@@ -339,6 +292,7 @@ type LineageAnnotE k = [(Text, k)]
                                    (VarE reifyTy al)))))
   return (AppE Proxy
                ConcatMap (TupleConstE (Tuple2E (LamE reifyTy'' compSingOrg) tbl')))
+
 {-
 lineageTransform k (AppE proxy Map
                     (TupleConstE (Tuple2E (LamE lam) tbl))) = do
