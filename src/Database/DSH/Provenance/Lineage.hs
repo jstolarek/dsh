@@ -301,6 +301,11 @@ lineageTransform reifyA reifyK (AppE Append (TupleConstE (Tuple2E xs ys))) =
        ys' <- lineageTransform reifyA reifyK ys
        return (AppE Append (TupleConstE (Tuple2E xs' ys')))
 
+-- L(reverse xs) = reverse (L(xs))
+lineageTransform reifyA reifyK  (AppE Reverse xs) = do
+  xs' <- lineageTransform reifyA reifyK  xs
+  return (AppE Reverse xs')
+
 -- constants
 lineageTransform _ _ e@(UnitE)         = return e
 lineageTransform _ _ e@(BoolE       _) = return e
@@ -372,11 +377,6 @@ lineageTransform k e@(AppE _ Guard b) = do
 lineageTransform _ e@(AppE _ Guard _) = return (emptyLineageListE e)
 lineageTransform _ e@(AppE _ Cons (TupleConstE (Tuple2E _ _))) =
   return (emptyLineageListE e)
-
--- L(reverse xs) = reverse (L(xs))
-lineageTransform k (AppE _ Reverse xs) = do
-  xs' <- lineageTransform k xs
-  return (AppE Proxy Reverse xs')
 
 -- NOT YET IMPLEMENTED
 
