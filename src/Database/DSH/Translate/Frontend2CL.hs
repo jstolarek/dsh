@@ -89,7 +89,7 @@ translate (TableE t _) =
         bty = translateType ty
     in translateTable bty t
 
-translate (AppE _ f args) = translateApp f args
+translate (AppE f args) = translateApp f args
 
 translateApp3 :: (CL.Expr -> CL.Expr -> CL.Expr -> CL.Expr)
               -> Exp (a, b, c)

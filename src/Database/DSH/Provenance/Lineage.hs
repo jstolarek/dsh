@@ -237,10 +237,10 @@ lineageTransform reifyA reifyK tbl@(TableE (TableDB name _ _) keyProj) = do
           reifyC Proxy = case reifyA Proxy of
                            ListT t -> t
                            _       -> $impossible
-      return (AppE Proxy Map (TupleConstE (Tuple2E (LamE reifyC (lam (reifyLT mkReify reifyK))) tbl)))
+      return (AppE Map (TupleConstE (Tuple2E (LamE reifyC (lam (reifyLT mkReify reifyK))) tbl)))
     Nothing -> $impossible
 
-lineageTransform reifyA reifyK (AppE Proxy ConcatMap
+lineageTransform reifyA reifyK (AppE ConcatMap
                    (TupleConstE (Tuple2E (LamE reifyC lam) tbl))) = do
 
   -- translate the comprehension generator
@@ -276,7 +276,7 @@ lineageTransform reifyA reifyK (AppE Proxy ConcatMap
 
       -- comprehension that appends lineages of currently traversed collection
       -- and result of nested part of comprehension
-      compLineageApp al = AppE Proxy Map (TupleConstE
+      compLineageApp al = AppE Map (TupleConstE
              (Tuple2E (LamE reifyTy (lamAppend al)) bodyExp))
 
       -- comprehension over singleton list containing data originally assigned
@@ -286,12 +286,11 @@ lineageTransform reifyA reifyK (AppE Proxy ConcatMap
                        (compLineageApp al)
 -}
 
-      compSingOrg al = AppE Proxy ConcatMap (TupleConstE
+      compSingOrg al = AppE ConcatMap (TupleConstE
              (Tuple2E (LamE reifyTy' (\a -> subst a boundVar (compLineageApp al)))
                       (singletonE reifyTy' (lineageDataE
                                    (VarE reifyTy al)))))
-  return (AppE Proxy
-               ConcatMap (TupleConstE (Tuple2E (LamE reifyTy'' compSingOrg) tbl')))
+  return (AppE ConcatMap (TupleConstE (Tuple2E (LamE reifyTy'' compSingOrg) tbl')))
 
 {-
 lineageTransform k (AppE proxy Map
@@ -503,19 +502,19 @@ lineageAnnotE reifyK table_name key =
 -- | Append two lineage annotations
 lineageAppendE :: Exp (LineageAnnotE k) -> Exp (LineageAnnotE k)
                -> Exp (LineageAnnotE k)
-lineageAppendE a b = AppE Proxy Append (pairE a b)
+lineageAppendE a b = AppE Append (pairE a b)
 
 -- | Construct a singleton list
 singletonE :: DReify a -> Exp a -> Exp [a]
-singletonE reify = ListE reify . S.singleton
+singletonE dreify = ListE dreify . S.singleton
 
 -- | Extract data from a lineage-annotated row
 lineageDataE :: Exp (LineageE a k) -> Exp a
-lineageDataE = AppE Proxy (TupElem Tup2_1)
+lineageDataE = AppE (TupElem Tup2_1)
 
 -- | Extract lineage from a lineage-annotated row
 lineageProvE :: Exp (LineageE a k) -> Exp (LineageAnnotE k)
-lineageProvE = AppE Proxy (TupElem Tup2_2)
+lineageProvE = AppE (TupElem Tup2_2)
 
 -- | Construct a lambda that adds empty lineage to its argument:
 --
@@ -531,33 +530,8 @@ emptyLineageLamE x = emptyLineageE (VarE mkReify x)
 --
 emptyLineageListE :: (Reify a, Reify k) => Exp [a] -> Exp [LineageE a k]
 emptyLineageListE e =
-    AppE Proxy Map (TupleConstE (Tuple2E (LamE mkReify emptyLineageLamE) e))
+    AppE Map (TupleConstE (Tuple2E (LamE mkReify emptyLineageLamE) e))
 
-
---------------------------------------------------------------------------------
---                           PROXY TRANSFORMERS                               --
---------------------------------------------------------------------------------
-
--- These functions convert between various proxy types.  They are used to guide
--- type inference by hand when constructing expressions.  These are
--- general-purpose proxy transformers used by several functions.  Specialized
--- transformers used by only one function are defined within functions.
-
--- | Return type of list element
-proxyElem :: Proxy [a] -> Proxy a
-proxyElem Proxy = Proxy
-
--- | Return type of row augmented with lineage information
-proxyLineage :: Proxy a -> Proxy (LineageE a k)
-proxyLineage Proxy = Proxy
-
--- | Return type of second component of a tuple
-proxySnd :: Proxy (a, b) -> Proxy b
-proxySnd Proxy = Proxy
-
--- | Specialized proxy
-proxyLineageElem :: Proxy (LineageE [b] k) -> Proxy (LineageE b k)
-proxyLineageElem Proxy = Proxy
 
 --------------------------------------------------------------------------------
 --                              SUBSTITUTION                                  --
@@ -577,7 +551,7 @@ subst _ _ (DecimalE d)    = DecimalE d
 subst _ _ (ScientificE s) = ScientificE s
 subst _ _ (DayE d)        = DayE d
 subst x v (ListE r l)     = ListE r (fmap (subst x v) l)
-subst x v (AppE p f e)    = AppE p f (subst x v e)
+subst x v (AppE f e)      = AppE f (subst x v e)
 subst x v (LamE r f)      = LamE r (\y -> subst x v (f y))
 subst _ _ (TableE t k)    = TableE t k
 subst x v (TupleConstE t) =

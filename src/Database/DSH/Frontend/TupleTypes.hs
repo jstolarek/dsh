@@ -27,7 +27,6 @@ module Database.DSH.Frontend.TupleTypes
     ) where
 
 import           Data.List
-import           Data.Proxy
 import           Data.Text   (Text)
 import           Text.Printf
 
@@ -675,8 +674,7 @@ qName = mkName "Q"
 mkTupElemTerm :: Int -> Int -> Exp -> Q Exp
 mkTupElemTerm width idx arg = do
     let ta = ConE $ tupAccName width idx
-    return $ AppE (AppE (AppE (ConE $ mkName "AppE")
-                              (ConE 'Proxy))
+    return $ AppE (AppE (ConE $ mkName "AppE")
                         (AppE (ConE $ mkName "TupElem") ta)) arg
 
 -- | From a list of operand terms, construct a DSH tuple term.
