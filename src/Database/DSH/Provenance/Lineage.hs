@@ -352,6 +352,11 @@ lineageTransform reifyA reifyK (AppE Reverse xs) = do
   xs' <- lineageTransform reifyA reifyK  xs
   return (AppE Reverse xs')
 
+-- variables
+lineageTransform _ reifyK (VarE reifyVar v) = do
+  let reifyVar' Proxy = typeLT (reifyVar Proxy) (reifyK Proxy)
+  return (VarE reifyVar' v)
+
 -- constants
 lineageTransform _ _ e@(UnitE)         = return e
 lineageTransform _ _ e@(BoolE       _) = return e
@@ -364,7 +369,6 @@ lineageTransform _ _ e@(ScientificE _) = return e
 lineageTransform _ _ e@(DecimalE    _) = return e
 
 {-
-lineageTransform _   (VarE _ v)       = return (VarE Proxy v)
 {- JSTOLAREK: speculative
 lineageTransform k e@(ListE xs)       = do
   xs' <- mapM (lineageTransform k) xs
