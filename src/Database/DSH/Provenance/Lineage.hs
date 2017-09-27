@@ -237,6 +237,56 @@ lineageTransform reifyA reifyK tbl@(TableE (TableDB name _ _) keyProj) = do
                         (LamE reifyC (lam (reifyLT mkReify reifyK))) tbl)))
     Nothing -> $impossible
 
+lineageTransform reifyA reifyK (AppE Map
+                   (TupleConstE (Tuple2E (LamE reifyC lam) tbl))) = do
+  -- translate the comprehension generator
+  let reifyCs Proxy = ListT (reifyC Proxy)
+  tbl' <- lineageTransform reifyCs reifyK tbl
+
+  -- saturate the lambda and translate the resulting expression
+  let reifyB Proxy = case reifyA Proxy of
+                       ListT t -> t
+                       _       -> $impossible
+  boundVar <- freshVar
+  bodyExp  <- lineageTransform reifyA reifyK (singletonE reifyB (lam boundVar))
+
+  let lineageRecTy :: Type c -> Type (LineageTransform c k)
+      lineageRecTy t = typeLT t (reifyK Proxy)
+
+      annotTy = ListT (TupleT $ Tuple2T TextT (reifyK Proxy))
+
+      reifyTy Proxy = case reifyA Proxy of
+                        ListT t -> TupleT (Tuple2T (lineageRecTy t) annotTy)
+                        _       -> $impossible
+
+      reifyTy' Proxy = case reifyA Proxy of
+                        ListT t -> lineageRecTy t
+                        _       -> $impossible
+
+      reifyTy'' Proxy = case reifyC Proxy of
+                        t -> TupleT (Tuple2T (lineageRecTy t) annotTy)
+
+      -- lambda that appends lineages
+      lamAppend al z =
+             lineageE (lineageDataE (VarE reifyTy z))
+                        ((lineageProvE (VarE reifyTy al)) `lineageAppendE`
+                         (lineageProvE (VarE reifyTy  z)))
+
+      -- comprehension that appends lineages of currently traversed collection
+      -- and result of nested part of comprehension
+      compLineageApp al = AppE Map (TupleConstE
+             (Tuple2E (LamE reifyTy (lamAppend al)) bodyExp))
+
+      -- comprehension over singleton list containing data originally assigned
+      -- to comprehension binder
+      compSingOrg al = AppE ConcatMap (TupleConstE
+             (Tuple2E (LamE reifyTy'
+                            (\a -> subst a boundVar (compLineageApp al)))
+                      (singletonE reifyTy' (lineageDataE
+                                   (VarE reifyTy al)))))
+  return (AppE ConcatMap (TupleConstE (Tuple2E
+                                       (LamE reifyTy'' compSingOrg) tbl')))
+
 lineageTransform reifyA reifyK (AppE ConcatMap
                    (TupleConstE (Tuple2E (LamE reifyC lam) tbl))) = do
   -- translate the comprehension generator
@@ -314,50 +364,6 @@ lineageTransform _ _ e@(ScientificE _) = return e
 lineageTransform _ _ e@(DecimalE    _) = return e
 
 {-
-lineageTransform k (AppE proxy Map
-                    (TupleConstE (Tuple2E (LamE lam) tbl))) = do
-  -- translate the comprehension generator
-  tbl' <- lineageTransform k tbl
-  -- saturate the lambda and translate the resulting expression
-  boundVar <- freshVar
-  bodyExp  <- lineageTransform k (singletonE (lam boundVar))
-
-  let -- Specialized proxy transformers
-      proxyRes :: Proxy (x -> y, [x]) -> Proxy y
-      proxyRes Proxy = Proxy
-
-      proxyLineageApp :: Proxy (x -> y, [x])
-                      -> Proxy (LineageE y k -> LineageE y k, [LineageE y k])
-      proxyLineageApp Proxy = Proxy
-
-      proxySingOrg :: Proxy (x -> y, [x]) -> Proxy (x -> [LineageE y k], [x])
-      proxySingOrg Proxy = Proxy
-
-      -- proxies needed to guide variable types
-      proxy'  = proxyLineage (proxyRes proxy)
-      proxy'' = proxyLineage (proxySnd proxy)
-
-      -- lambda that appends lineages
-      lamAppend al z = lineageE (lineageDataE (VarE mkReify z))
-                        ((lineageProvE (VarE mkReify al)) `lineageAppendE`
-                         (lineageProvE (VarE mkReify  z)))
-
-      -- comprehension that appends lineages of currently traversed collection
-      -- and result of nested part of comprehension
-      compLineageApp al = AppE (proxyLineageApp proxy) Map (TupleConstE
-             (Tuple2E (LamE (lamAppend al)) bodyExp))
-
-      -- comprehension over singleton list containing data originally assigned
-      -- to comprehension binder
-      compSingOrg al = AppE (proxySingOrg proxy) ConcatMap (TupleConstE
-             (Tuple2E (LamE (\a -> subst a boundVar (compLineageApp al)))
-                      (singletonE (lineageDataE
-                                   (VarE mkReify al)))))
-  return (AppE Proxy
-               ConcatMap (TupleConstE (Tuple2E (LamE compSingOrg) tbl')))
-
-lineageTransform _ _ = $unimplemented
-
 lineageTransform _   (VarE _ v)       = return (VarE Proxy v)
 {- JSTOLAREK: speculative
 lineageTransform k e@(ListE xs)       = do
