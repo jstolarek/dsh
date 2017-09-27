@@ -98,11 +98,11 @@ type family LineageTransform a k = r | r -> a where
     LineageTransform Day        k =  Day
     LineageTransform (a -> b)   k =  a -> b
     LineageTransform [a]        k = [LineageE (LineageTransform a k) k]
-    LineageTransform (a,b)      k = (LineageTransform a k, LineageTransform b k)
-    -- JSTOLAREK: these definitions inconsistent with pair definition
-    LineageTransform (a,b,c)    k = (LineageE a k, LineageE b k, LineageE c k)
-    LineageTransform (a,b,c,d)  k = ( LineageE a k, LineageE b k, LineageE c k
-                                    , LineageE d k)
+    LineageTransform (a,b)      k = ( LineageTransform a k, LineageTransform b k)
+    LineageTransform (a,b,c)    k = ( LineageTransform a k, LineageTransform b k
+                                    , LineageTransform c k)
+    LineageTransform (a,b,c,d)  k = ( LineageTransform a k, LineageTransform b k
+                                    , LineageTransform c k, LineageTransform d k)
     -- JSTOLAREK: more tuple types, up to 16
 
 class (QA a) => QLTable a where
@@ -111,39 +111,39 @@ class (QA a) => QLTable a where
          -> LineageTransform (Rep a) (Rep k) :~: Rep (LT a k)
 
 instance QLTable () where
-    type LT () k = () --Lineage () k
+    type LT () k = ()
     ltEq _ _ = Refl
 
 instance QLTable Bool where
-    type LT Bool k = Bool -- Lineage Bool k
+    type LT Bool k = Bool
     ltEq _ _ = Refl
 
 instance QLTable Char where
-    type LT Char k = Char -- Lineage Char k
+    type LT Char k = Char
     ltEq _ _ = Refl
 
 instance QLTable Integer where
-    type LT Integer k = Integer -- Lineage Integer k
+    type LT Integer k = Integer
     ltEq _ _ = Refl
 
 instance QLTable Double where
-    type LT Double k = Double -- Lineage Double k
+    type LT Double k = Double
     ltEq _ _ = Refl
 
 instance QLTable Text where
-    type LT Text k = Text -- Lineage Text k
+    type LT Text k = Text
     ltEq _ _ = Refl
 
 instance QLTable Decimal where
-    type LT Decimal k = Decimal -- Lineage Decimal k
+    type LT Decimal k = Decimal
     ltEq _ _ = Refl
 
 instance QLTable Scientific where
-    type LT Scientific k = Scientific -- Lineage Scientific k
+    type LT Scientific k = Scientific
     ltEq _ _ = Refl
 
 instance QLTable Day where
-    type LT Day k = Day -- Lineage Day k
+    type LT Day k = Day
     ltEq _ _ = Refl
 
 instance QLTable a => QLTable [a] where
@@ -158,7 +158,7 @@ instance (QLTable a, QLTable b) => QLTable (a, b) where
 
 instance (QLTable a, QLTable b, QLTable c)
     => QLTable (a, b, c) where
-    type LT (a, b, c) k = (Lineage a k, Lineage b k, Lineage c k)
+    type LT (a, b, c) k = (LT a k, LT b k, LT c k)
     ltEq _ k =
         let ltEqA = ltEq (Proxy :: Proxy a) k
             ltEqB = ltEq (Proxy :: Proxy b) k
@@ -168,7 +168,7 @@ instance (QLTable a, QLTable b, QLTable c)
 
 instance (QLTable a, QLTable b, QLTable c, QLTable d)
     => QLTable (a, b, c, d) where
-    type LT (a, b, c, d) k = (Lineage a k, Lineage b k, Lineage c k, Lineage d k)
+    type LT (a, b, c, d) k = (LT a k, LT b k, LT c k, LT d k)
     ltEq _ k =
         let ltEqA = ltEq (Proxy :: Proxy a) k
             ltEqB = ltEq (Proxy :: Proxy b) k
@@ -199,19 +199,15 @@ typeLT (DecimalT)       _ = DecimalT
 typeLT (ScientificT)    _ = ScientificT
 typeLT (DayT)           _ = DayT
 typeLT (ArrowT fun arg) _ = (ArrowT fun arg)
-typeLT (ListT lt) kt = ListT (TupleT $ Tuple2T (typeLT lt kt)
-                                            (ListT (TupleT $ Tuple2T TextT kt)))
-typeLT (TupleT (Tuple2T a b)) kt = TupleT (Tuple2T (typeLT a kt) (typeLT b kt))
--- JSTOLAREK: these definitions inconsistent with pair definition
-typeLT (TupleT (Tuple3T a b c)) kt = TupleT (Tuple3T
-     (TupleT $ Tuple2T a (ListT (TupleT $ Tuple2T TextT kt)))
-     (TupleT $ Tuple2T b (ListT (TupleT $ Tuple2T TextT kt)))
-     (TupleT $ Tuple2T c (ListT (TupleT $ Tuple2T TextT kt))))
-typeLT (TupleT (Tuple4T a b c d)) kt = TupleT (Tuple4T
-     (TupleT $ Tuple2T a (ListT (TupleT $ Tuple2T TextT kt)))
-     (TupleT $ Tuple2T b (ListT (TupleT $ Tuple2T TextT kt)))
-     (TupleT $ Tuple2T c (ListT (TupleT $ Tuple2T TextT kt)))
-     (TupleT $ Tuple2T d (ListT (TupleT $ Tuple2T TextT kt))))
+typeLT (ListT lt) kt =
+    ListT (TupleT $ Tuple2T (typeLT lt kt)
+                      (ListT (TupleT $ Tuple2T TextT kt)))
+typeLT (TupleT (Tuple2T a b)) kt =
+    TupleT (Tuple2T (typeLT a kt) (typeLT b kt))
+typeLT (TupleT (Tuple3T a b c)) kt =
+    TupleT (Tuple3T (typeLT a kt) (typeLT b kt) (typeLT c kt))
+typeLT (TupleT (Tuple4T a b c d)) kt =
+    TupleT (Tuple4T (typeLT a kt) (typeLT b kt) (typeLT c kt) (typeLT d kt))
 -- JSTOLAREK: add tuple support up to 16, use TH
 typeLT _ _ = $unimplemented
 
@@ -243,14 +239,12 @@ lineageTransform reifyA reifyK tbl@(TableE (TableDB name _ _) keyProj) = do
 
 lineageTransform reifyA reifyK (AppE ConcatMap
                    (TupleConstE (Tuple2E (LamE reifyC lam) tbl))) = do
-
   -- translate the comprehension generator
-  -- tbl' :: Exp [LineageE (LineageTransform a4 k) k]
   let reifyCs Proxy = ListT (reifyC Proxy)
   tbl' <- lineageTransform reifyCs reifyK tbl
+
   -- saturate the lambda and translate the resulting expression
   boundVar <- freshVar
-  --  bodyExp :: Exp [LineageE (LineageTransform b1 k) k]
   bodyExp  <- lineageTransform reifyA reifyK (lam boundVar)
 
   let lineageRecTy :: Type c -> Type (LineageTransform c k)
@@ -282,16 +276,18 @@ lineageTransform reifyA reifyK (AppE ConcatMap
 
       -- comprehension over singleton list containing data originally assigned
       -- to comprehension binder
-{-
-      compSingOrg al = LetE boundVar (lineageDataE (VarE (proxyLineageElem proxy'') al))
-                       (compLineageApp al)
--}
-
       compSingOrg al = AppE ConcatMap (TupleConstE
              (Tuple2E (LamE reifyTy'
                             (\a -> subst a boundVar (compLineageApp al)))
                       (singletonE reifyTy' (lineageDataE
                                    (VarE reifyTy al)))))
+      -- JSTOLAREK: alternative version using let-bindings.  These currently
+      -- don't work.  See email from Alex on 10/07/2017
+{-
+      compSingOrg al = LetE boundVar (lineageDataE (VarE reifyTy al))
+                                     (compLineageApp al)
+-}
+
   return (AppE ConcatMap (TupleConstE (Tuple2E
                                        (LamE reifyTy'' compSingOrg) tbl')))
 
@@ -302,7 +298,7 @@ lineageTransform reifyA reifyK (AppE Append (TupleConstE (Tuple2E xs ys))) =
        return (AppE Append (TupleConstE (Tuple2E xs' ys')))
 
 -- L(reverse xs) = reverse (L(xs))
-lineageTransform reifyA reifyK  (AppE Reverse xs) = do
+lineageTransform reifyA reifyK (AppE Reverse xs) = do
   xs' <- lineageTransform reifyA reifyK  xs
   return (AppE Reverse xs')
 
