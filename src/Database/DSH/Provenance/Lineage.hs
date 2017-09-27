@@ -368,12 +368,15 @@ lineageTransform _ _ e@(DayE        _) = return e
 lineageTransform _ _ e@(ScientificE _) = return e
 lineageTransform _ _ e@(DecimalE    _) = return e
 
-{-
-{- JSTOLAREK: speculative
-lineageTransform k e@(ListE xs)       = do
-  xs' <- mapM (lineageTransform k) xs
-  return (emptyLineageListE e)
+{- JSTOLAREK: broken
+lineageTransform _ reifyK e@(ListE reifyA xs)       = do
+  xs' <- mapM (lineageTransform reifyA reifyK) xs
+  return (ListE undefined xs') -- (emptyLineageListE e)
 -}
+{-
+lineageTransform reifyA reifyK e@(ListE r _) = do
+    return (emptyLineageListE r reifyK e)
+
 lineageTransform _ e@(ListE _)        = return (emptyLineageListE e)
 {- JSTOLAREK: speculative
 lineageTransform k e@(AppE _ Guard b) = do
@@ -488,7 +491,7 @@ lineageProvQ (view -> (_, lin)) = lin
 
 -- | Attach empty lineage to a value
 emptyLineageQ :: (QA a, QA k) => Q a -> Q (Lineage a k)
-emptyLineageQ (Q a) = Q (emptyLineageE a)
+emptyLineageQ (Q a) = Q (emptyLineageE mkReify a)
 
 --------------------------------------------------------------------------------
 --                      SMART HELPERS FOR CONSTRUCTING EXP                    --
@@ -499,8 +502,10 @@ lineageE :: Exp a -> Exp (LineageAnnotE k) -> Exp (LineageE a k)
 lineageE row lin = TupleConstE (Tuple2E row lin)
 
 -- | Attach empty lineage to a value
-emptyLineageE :: Reify k => Exp a -> Exp (LineageE a k)
-emptyLineageE a = TupleConstE (Tuple2E a (ListE mkReify (S.empty)))
+emptyLineageE :: DReify k -> Exp a -> Exp (LineageE a k)
+emptyLineageE reifyK a =
+    let reifyAnnot Proxy = TupleT (Tuple2T TextT (reifyK Proxy))
+    in TupleConstE (Tuple2E a (ListE reifyAnnot (S.empty)))
 
 -- | Lineage annotation constructor
 lineageAnnotE :: DReify k -> Text -> Exp k -> Exp (LineageAnnotE k)
@@ -529,18 +534,19 @@ lineageProvE = AppE (TupElem Tup2_2)
 --
 --    (\a -> emptyLineageE a)
 --
-emptyLineageLamE :: forall a k. (Reify a, Reify k)
-                 => Integer -> Exp (LineageE a k)
-emptyLineageLamE x = emptyLineageE (VarE mkReify x)
-
+emptyLineageLamE :: forall a k. DReify a -> DReify k -> Integer
+                 -> Exp (LineageE a k)
+emptyLineageLamE reifyA reifyK x = emptyLineageE reifyK (VarE reifyA x)
+{-
+JSTOLAREK: code broken, need to figure out how to handle lists
 -- | Add empty lineage to all elements in a list:
 --
 --    map (\a -> emptyLineageE a) e
 --
-emptyLineageListE :: (Reify a, Reify k) => Exp [a] -> Exp [LineageE a k]
-emptyLineageListE e =
-    AppE Map (TupleConstE (Tuple2E (LamE mkReify emptyLineageLamE) e))
-
+emptyLineageListE :: DReify a -> DReify k -> Exp [a] -> Exp (LineageE a k)
+emptyLineageListE reifyA reifyK e = undefined
+ --   AppE Map (TupleConstE (Tuple2E (LamE undefined (emptyLineageLamE reifyA reifyK)) e))
+-}
 
 --------------------------------------------------------------------------------
 --                              SUBSTITUTION                                  --
