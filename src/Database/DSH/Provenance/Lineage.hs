@@ -397,32 +397,14 @@ lineageTransform _ reifyK (ListE reifyA xs) = do
 lineageTransform _ reifyK e@(AppE Guard _) = do
     return (emptyLineageListE (\Proxy -> UnitT) reifyK e)
 
-lineageTransform _ _ (AppE Cons (TupleConstE (Tuple2E _ _))) =
-    $unimplemented
-{-
-  (x' :: Exp (LineageTransform b k))
-      <- lineageTransform undefined reifyK (x :: Exp b)
-  (xs' :: Exp [LineageE (LineageTransform b k) k])
-    <- lineageTransform undefined reifyK (xs :: Exp [b])
-  let c' = AppE Cons (TupleConstE (Tuple2E x' xs'))
-e :: Exp [a]
-x :: Exp a
-xs :: Exp [a]
+lineageTransform reifyA reifyK (AppE Cons (TupleConstE (Tuple2E x xs))) = do
+  let reifyX Proxy = case reifyA Proxy of
+                       ListT t -> t
+                       _       -> $impossible
+  x'  <- lineageTransform reifyX reifyK x
+  xs' <- lineageTransform reifyA reifyK xs
+  return (AppE Cons (TupleConstE (Tuple2E (emptyLineageE reifyK x') xs')))
 
-x' :: Exp (L a)
-xs :: Exp (L a)]
-
-AppE Cons x' xs' :: 
-
-    let reifyA' Proxy = case reifyA Proxy of
-                          ListT t -> t
-                          _       -> $impossible
-
-e :: Exp 
-  return undefined -- (emptyLineageListE undefined reifyK (AppE Cons (TupleConstE (Tuple2E x' xs'))))
--}
-
-{-
 -- NOT YET IMPLEMENTED
 
 -- concatMap (\x. concatMap (\y. map (\z. (z.data)^(z.prov + x.prov)) L(f y)) [x.data]) L(xs)
@@ -440,78 +422,77 @@ e :: Exp
 --   map (\(x,b). x) (filter (\(x,b). b)  (map (\x. (x, f(x.data))) L(xs)))
 --
 -- but this works only on paper. Again f(x.data) is not a valid expression
-lineageTransform _ (AppE _ Filter           _) = $unimplemented
+lineageTransform _ _ (AppE Filter           _) = $unimplemented
 
 -- concat has type [[a]] -> [a].  According to our TF declaration if input is
 -- [[a]] the return type is [L [a]], but we want [L a].
-lineageTransform _ (AppE _ Concat           _) = $unimplemented
+lineageTransform _ _ (AppE Concat           _) = $unimplemented
 
-lineageTransform _ (AppE _ Sum              _) = $unimplemented
-lineageTransform _ (AppE _ Avg              _) = $unimplemented
-lineageTransform _ (AppE _ Maximum          _) = $unimplemented
-lineageTransform _ (AppE _ Minimum          _) = $unimplemented
-lineageTransform _ (AppE _ Nub              _) = $unimplemented
-lineageTransform _ (AppE _ Zip              _) = $unimplemented
-lineageTransform _ (AppE _ GroupWithKey     _) = $unimplemented
-lineageTransform _ (AppE _ SortWith         _) = $unimplemented
-lineageTransform _ (AppE _ Cond             _) = $unimplemented
-lineageTransform _ (AppE _ Fst              _) = $unimplemented
-lineageTransform _ (AppE _ Snd              _) = $unimplemented
-lineageTransform _ (AppE _ (TupElem _)      _) = $unimplemented
-lineageTransform _ (AppE _ Only             _) = $unimplemented
-lineageTransform _ (AppE _ Length           _) = $unimplemented
-lineageTransform _ (AppE _ Null             _) = $unimplemented
-lineageTransform _ (AppE _ Number           _) = $unimplemented
-lineageTransform _ (AppE _ Add              _) = $unimplemented
-lineageTransform _ (AppE _ Mul              _) = $unimplemented
-lineageTransform _ (AppE _ Sub              _) = $unimplemented
-lineageTransform _ (AppE _ Div              _) = $unimplemented
-lineageTransform _ (AppE _ Mod              _) = $unimplemented
-lineageTransform _ (AppE _ Not              _) = $unimplemented
-lineageTransform _ (AppE _ And              _) = $unimplemented
-lineageTransform _ (AppE _ Or               _) = $unimplemented
-lineageTransform _ (AppE _ IntegerToDouble  _) = $unimplemented
-lineageTransform _ (AppE _ IntegerToDecimal _) = $unimplemented
-lineageTransform _ (AppE _ Lt               _) = $unimplemented
-lineageTransform _ (AppE _ Lte              _) = $unimplemented
-lineageTransform _ (AppE _ Gt               _) = $unimplemented
-lineageTransform _ (AppE _ Gte              _) = $unimplemented
-lineageTransform _ (AppE _ Equ              _) = $unimplemented
-lineageTransform _ (AppE _ NEq              _) = $unimplemented
-lineageTransform _ (AppE _ Conj             _) = $unimplemented
-lineageTransform _ (AppE _ Disj             _) = $unimplemented
-lineageTransform _ (AppE _ Like             _) = $unimplemented
-lineageTransform _ (AppE _ (SubString _ _)  _) = $unimplemented
-lineageTransform _ (AppE _ Sin              _) = $unimplemented
-lineageTransform _ (AppE _ ASin             _) = $unimplemented
-lineageTransform _ (AppE _ Cos              _) = $unimplemented
-lineageTransform _ (AppE _ ACos             _) = $unimplemented
-lineageTransform _ (AppE _ Tan              _) = $unimplemented
-lineageTransform _ (AppE _ ATan             _) = $unimplemented
-lineageTransform _ (AppE _ Sqrt             _) = $unimplemented
-lineageTransform _ (AppE _ Exp              _) = $unimplemented
-lineageTransform _ (AppE _ Log              _) = $unimplemented
-lineageTransform _ (AppE _ AddDays          _) = $unimplemented
-lineageTransform _ (AppE _ SubDays          _) = $unimplemented
-lineageTransform _ (AppE _ DiffDays         _) = $unimplemented
-lineageTransform _ (AppE _ DayDay           _) = $unimplemented
-lineageTransform _ (AppE _ DayMonth         _) = $unimplemented
-lineageTransform _ (AppE _ DayYear          _) = $unimplemented
+lineageTransform _ _ (AppE Sum              _) = $unimplemented
+lineageTransform _ _ (AppE Avg              _) = $unimplemented
+lineageTransform _ _ (AppE Maximum          _) = $unimplemented
+lineageTransform _ _ (AppE Minimum          _) = $unimplemented
+lineageTransform _ _ (AppE Nub              _) = $unimplemented
+lineageTransform _ _ (AppE Zip              _) = $unimplemented
+lineageTransform _ _ (AppE GroupWithKey     _) = $unimplemented
+lineageTransform _ _ (AppE SortWith         _) = $unimplemented
+lineageTransform _ _ (AppE Cond             _) = $unimplemented
+lineageTransform _ _ (AppE Fst              _) = $unimplemented
+lineageTransform _ _ (AppE Snd              _) = $unimplemented
+lineageTransform _ _ (AppE (TupElem _)      _) = $unimplemented
+lineageTransform _ _ (AppE Only             _) = $unimplemented
+lineageTransform _ _ (AppE Length           _) = $unimplemented
+lineageTransform _ _ (AppE Null             _) = $unimplemented
+lineageTransform _ _ (AppE Number           _) = $unimplemented
+lineageTransform _ _ (AppE Add              _) = $unimplemented
+lineageTransform _ _ (AppE Mul              _) = $unimplemented
+lineageTransform _ _ (AppE Sub              _) = $unimplemented
+lineageTransform _ _ (AppE Div              _) = $unimplemented
+lineageTransform _ _ (AppE Mod              _) = $unimplemented
+lineageTransform _ _ (AppE Not              _) = $unimplemented
+lineageTransform _ _ (AppE And              _) = $unimplemented
+lineageTransform _ _ (AppE Or               _) = $unimplemented
+lineageTransform _ _ (AppE IntegerToDouble  _) = $unimplemented
+lineageTransform _ _ (AppE IntegerToDecimal _) = $unimplemented
+lineageTransform _ _ (AppE Lt               _) = $unimplemented
+lineageTransform _ _ (AppE Lte              _) = $unimplemented
+lineageTransform _ _ (AppE Gt               _) = $unimplemented
+lineageTransform _ _ (AppE Gte              _) = $unimplemented
+lineageTransform _ _ (AppE Equ              _) = $unimplemented
+lineageTransform _ _ (AppE NEq              _) = $unimplemented
+lineageTransform _ _ (AppE Conj             _) = $unimplemented
+lineageTransform _ _ (AppE Disj             _) = $unimplemented
+lineageTransform _ _ (AppE Like             _) = $unimplemented
+lineageTransform _ _ (AppE (SubString _ _)  _) = $unimplemented
+lineageTransform _ _ (AppE Sin              _) = $unimplemented
+lineageTransform _ _ (AppE ASin             _) = $unimplemented
+lineageTransform _ _ (AppE Cos              _) = $unimplemented
+lineageTransform _ _ (AppE ACos             _) = $unimplemented
+lineageTransform _ _ (AppE Tan              _) = $unimplemented
+lineageTransform _ _ (AppE ATan             _) = $unimplemented
+lineageTransform _ _ (AppE Sqrt             _) = $unimplemented
+lineageTransform _ _ (AppE Exp              _) = $unimplemented
+lineageTransform _ _ (AppE Log              _) = $unimplemented
+lineageTransform _ _ (AppE AddDays          _) = $unimplemented
+lineageTransform _ _ (AppE SubDays          _) = $unimplemented
+lineageTransform _ _ (AppE DiffDays         _) = $unimplemented
+lineageTransform _ _ (AppE DayDay           _) = $unimplemented
+lineageTransform _ _ (AppE DayMonth         _) = $unimplemented
+lineageTransform _ _ (AppE DayYear          _) = $unimplemented
 
 -- We covered these functions already.  If they were to appear hear it would
 -- mean they were passed an invalid number of arguments, which should never
 -- happen.
-lineageTransform _ (AppE _ Cons      _) = $impossible
-lineageTransform _ (AppE _ ConcatMap _) = $impossible
-lineageTransform _ (AppE _ Map       _) = $impossible
-lineageTransform _ (AppE _ Append    _) = $impossible
-lineageTransform _ (TupleConstE      _) = $impossible
+lineageTransform _ _ (AppE Cons      _) = $impossible
+lineageTransform _ _ (AppE ConcatMap _) = $impossible
+lineageTransform _ _ (AppE Map       _) = $impossible
+lineageTransform _ _ (AppE Append    _) = $impossible
+lineageTransform _ _ (TupleConstE    _) = $impossible
 -- let bindings are introduced by lineageTransform so it is not possible to
 -- encounter one
-lineageTransform _ (LetE _ _ _) = $impossible
+lineageTransform _ _ (LetE _ _ _) = $impossible
 -- JSTOLAREK: think about lambdas
-lineageTransform _ (LamE _    ) = $impossible
--}
+lineageTransform _ _ (LamE _ _  ) = $impossible
 
 --------------------------------------------------------------------------------
 --             ACCESSING LINEAGE DATA AND PROVENANCE COMPONENTS               --
