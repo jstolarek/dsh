@@ -12,7 +12,7 @@
 
 module Database.DSH.Provenance.Lineage
     ( -- * Lineage transformation and data type
-      lineage, Lineage
+      lineage, Lineage, QLTable(..)
 
       -- * Accessing data and provenance components of lineage-annotated value
     , lineageDataQ, lineageProvQ, emptyLineageQ
@@ -104,6 +104,9 @@ type family LineageTransform a k = r | r -> a where
                                     , LineageTransform c k)
     LineageTransform (a,b,c,d)  k = ( LineageTransform a k, LineageTransform b k
                                     , LineageTransform c k, LineageTransform d k)
+    LineageTransform (a,b,c,d,e) k = ( LineageTransform a k, LineageTransform b k
+                                     , LineageTransform c k, LineageTransform d k
+                                     , LineageTransform e k)
     -- JSTOLAREK: more tuple types, up to 16
 
 class (QA a) => QLTable a where
@@ -178,13 +181,25 @@ instance (QLTable a, QLTable b, QLTable c, QLTable d)
         in case (ltEqA, ltEqB, ltEqC, ltEqD) of
              (Refl, Refl, Refl, Refl) -> Refl
 
+instance (QLTable a, QLTable b, QLTable c, QLTable d, QLTable e)
+    => QLTable (a, b, c, d, e) where
+    type LT (a, b, c, d, e) k = (LT a k, LT b k, LT c k, LT d k, LT e k)
+    ltEq _ k =
+        let ltEqA = ltEq (Proxy :: Proxy a) k
+            ltEqB = ltEq (Proxy :: Proxy b) k
+            ltEqC = ltEq (Proxy :: Proxy c) k
+            ltEqD = ltEq (Proxy :: Proxy d) k
+            ltEqE = ltEq (Proxy :: Proxy e) k
+        in case (ltEqA, ltEqB, ltEqC, ltEqD, ltEqE) of
+             (Refl, Refl, Refl, Refl, Refl) -> Refl
+
 -- | Perform lineage transformation on a query
 lineage :: forall a k.
            ( Reify (Rep a), QA k, Typeable (Rep k), QLTable a
            , Reify (LineageTransform (Rep a) (Rep k)) )
         => Proxy k -> Q a -> Q (LT a k)
 lineage pk (Q a) =
-   let pa  = Proxy :: Proxy a
+   let pa = Proxy :: Proxy a
    in Q (castWith (apply Refl (ltEq pa pk))
                   (runLineage (lineageTransform mkReify
                                                (mkReify :: DReify (Rep k)) a)))
@@ -209,6 +224,9 @@ typeLT (TupleT (Tuple3T a b c)) kt =
     TupleT (Tuple3T (typeLT a kt) (typeLT b kt) (typeLT c kt))
 typeLT (TupleT (Tuple4T a b c d)) kt =
     TupleT (Tuple4T (typeLT a kt) (typeLT b kt) (typeLT c kt) (typeLT d kt))
+typeLT (TupleT (Tuple5T a b c d e)) kt =
+    TupleT (Tuple5T (typeLT a kt) (typeLT b kt) (typeLT c kt) (typeLT d kt)
+                    (typeLT e kt))
 -- JSTOLAREK: add tuple support up to 16, use TH
 typeLT _ _ = $unimplemented
 
@@ -379,10 +397,32 @@ lineageTransform _ reifyK (ListE reifyA xs) = do
 lineageTransform _ reifyK e@(AppE Guard _) = do
     return (emptyLineageListE (\Proxy -> UnitT) reifyK e)
 
+lineageTransform _ _ (AppE Cons (TupleConstE (Tuple2E _ _))) =
+    $unimplemented
 {-
-lineageTransform _ e@(AppE _ Cons (TupleConstE (Tuple2E _ _))) =
-  return (emptyLineageListE e)
+  (x' :: Exp (LineageTransform b k))
+      <- lineageTransform undefined reifyK (x :: Exp b)
+  (xs' :: Exp [LineageE (LineageTransform b k) k])
+    <- lineageTransform undefined reifyK (xs :: Exp [b])
+  let c' = AppE Cons (TupleConstE (Tuple2E x' xs'))
+e :: Exp [a]
+x :: Exp a
+xs :: Exp [a]
 
+x' :: Exp (L a)
+xs :: Exp (L a)]
+
+AppE Cons x' xs' :: 
+
+    let reifyA' Proxy = case reifyA Proxy of
+                          ListT t -> t
+                          _       -> $impossible
+
+e :: Exp 
+  return undefined -- (emptyLineageListE undefined reifyK (AppE Cons (TupleConstE (Tuple2E x' xs'))))
+-}
+
+{-
 -- NOT YET IMPLEMENTED
 
 -- concatMap (\x. concatMap (\y. map (\z. (z.data)^(z.prov + x.prov)) L(f y)) [x.data]) L(xs)
