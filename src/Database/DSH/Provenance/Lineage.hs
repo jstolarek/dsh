@@ -409,10 +409,8 @@ lineageTransform reifyA reifyK (AppE Cons (TupleConstE (Tuple2E x xs))) = do
 lineageTransform reifyA reifyK (TupleConstE (Tuple2E a b)) = do
   let reify1 Proxy = case reifyA Proxy of
                        TupleT (Tuple2T t _) -> t
-                       _                    -> $impossible
       reify2 Proxy = case reifyA Proxy of
                        TupleT (Tuple2T _ t) -> t
-                       _                    -> $impossible
   a' <- lineageTransform reify1 reifyK a
   b' <- lineageTransform reify2 reifyK b
   return (TupleConstE (Tuple2E a' b'))
@@ -420,13 +418,10 @@ lineageTransform reifyA reifyK (TupleConstE (Tuple2E a b)) = do
 lineageTransform reifyA reifyK (TupleConstE (Tuple3E a b c)) = do
   let reify1 Proxy = case reifyA Proxy of
                        TupleT (Tuple3T t _ _) -> t
-                       _                      -> $impossible
       reify2 Proxy = case reifyA Proxy of
                        TupleT (Tuple3T _ t _) -> t
-                       _                      -> $impossible
       reify3 Proxy = case reifyA Proxy of
                        TupleT (Tuple3T _ _ t) -> t
-                       _                      -> $impossible
   a' <- lineageTransform reify1 reifyK a
   b' <- lineageTransform reify2 reifyK b
   c' <- lineageTransform reify3 reifyK c
@@ -435,16 +430,12 @@ lineageTransform reifyA reifyK (TupleConstE (Tuple3E a b c)) = do
 lineageTransform reifyA reifyK (TupleConstE (Tuple4E a b c d)) = do
   let reify1 Proxy = case reifyA Proxy of
                        TupleT (Tuple4T t _ _ _) -> t
-                       _                        -> $impossible
       reify2 Proxy = case reifyA Proxy of
                        TupleT (Tuple4T _ t _ _) -> t
-                       _                        -> $impossible
       reify3 Proxy = case reifyA Proxy of
                        TupleT (Tuple4T _ _ t _) -> t
-                       _                        -> $impossible
       reify4 Proxy = case reifyA Proxy of
                        TupleT (Tuple4T _ _ _ t) -> t
-                       _                        -> $impossible
   a' <- lineageTransform reify1 reifyK a
   b' <- lineageTransform reify2 reifyK b
   c' <- lineageTransform reify3 reifyK c
@@ -454,26 +445,55 @@ lineageTransform reifyA reifyK (TupleConstE (Tuple4E a b c d)) = do
 lineageTransform reifyA reifyK (TupleConstE (Tuple5E a b c d e)) = do
   let reify1 Proxy = case reifyA Proxy of
                        TupleT (Tuple5T t _ _ _ _) -> t
-                       _                          -> $impossible
       reify2 Proxy = case reifyA Proxy of
                        TupleT (Tuple5T _ t _ _ _) -> t
-                       _                          -> $impossible
       reify3 Proxy = case reifyA Proxy of
                        TupleT (Tuple5T _ _ t _ _) -> t
-                       _                          -> $impossible
       reify4 Proxy = case reifyA Proxy of
                        TupleT (Tuple5T _ _ _ t _) -> t
-                       _                          -> $impossible
       reify5 Proxy = case reifyA Proxy of
                        TupleT (Tuple5T _ _ _ _ t) -> t
-                       _                          -> $impossible
   a' <- lineageTransform reify1 reifyK a
   b' <- lineageTransform reify2 reifyK b
   c' <- lineageTransform reify3 reifyK c
   d' <- lineageTransform reify4 reifyK d
-  e' <- lineageTransform reify4 reifyK e
+  e' <- lineageTransform reify5 reifyK e
   return (TupleConstE (Tuple5E a' b' c' d' e'))
+
 -- JSTOLAREK: more tuple types, up to 16
+lineageTransform _ _ (TupleConstE _ ) = $unimplemented
+
+lineageTransform reifyA reifyK (AppE (TupElem Tup2_1) x) = do
+  let reifyA' Proxy = TupleT (Tuple2T (reifyA Proxy) undefined)
+  x' <- lineageTransform reifyA' reifyK x
+  return (AppE (TupElem Tup2_1) x')
+
+lineageTransform reifyA reifyK (AppE (TupElem Tup2_2) x) = $unimplemented
+
+lineageTransform reifyA reifyK (AppE (TupElem Tup3_1) x) = $unimplemented
+lineageTransform reifyA reifyK (AppE (TupElem Tup3_2) x) = $unimplemented
+lineageTransform reifyA reifyK (AppE (TupElem Tup3_3) x) = $unimplemented
+
+lineageTransform reifyA reifyK (AppE (TupElem Tup4_1) x) = $unimplemented
+lineageTransform reifyA reifyK (AppE (TupElem Tup4_2) x) = $unimplemented
+lineageTransform reifyA reifyK (AppE (TupElem Tup4_3) x) = $unimplemented
+
+lineageTransform reifyA reifyK (AppE (TupElem Tup4_4) x) = do
+  let reifyA' Proxy = TupleT (Tuple4T undefined undefined undefined (reifyA Proxy))
+  x' <- lineageTransform reifyA' reifyK x
+  return (AppE (TupElem Tup4_4) x')
+
+lineageTransform reifyA reifyK (AppE (TupElem Tup5_1) x) = $unimplemented
+
+lineageTransform reifyA reifyK (AppE (TupElem Tup5_2) x) = do
+  let reifyA' Proxy = TupleT (Tuple5T undefined (reifyA Proxy) undefined undefined undefined)
+  x' <- lineageTransform reifyA' reifyK x
+  return (AppE (TupElem Tup5_2) x')
+
+lineageTransform reifyA reifyK (AppE (TupElem Tup5_3) x) = $unimplemented
+lineageTransform reifyA reifyK (AppE (TupElem Tup5_4) x) = $unimplemented
+lineageTransform reifyA reifyK (AppE (TupElem Tup5_5) x) = $unimplemented
+
 
 -- NOT YET IMPLEMENTED
 
@@ -509,7 +529,6 @@ lineageTransform _ _ (AppE SortWith         _) = $unimplemented
 lineageTransform _ _ (AppE Cond             _) = $unimplemented
 lineageTransform _ _ (AppE Fst              _) = $unimplemented
 lineageTransform _ _ (AppE Snd              _) = $unimplemented
-lineageTransform _ _ (AppE (TupElem _)      _) = $unimplemented
 lineageTransform _ _ (AppE Only             _) = $unimplemented
 lineageTransform _ _ (AppE Length           _) = $unimplemented
 lineageTransform _ _ (AppE Null             _) = $unimplemented
