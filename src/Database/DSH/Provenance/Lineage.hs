@@ -397,6 +397,7 @@ lineageTransform _ reifyK (ListE reifyA xs) = do
 lineageTransform _ reifyK e@(AppE Guard _) = do
     return (emptyLineageListE (\Proxy -> UnitT) reifyK e)
 
+-- cons
 lineageTransform reifyA reifyK (AppE Cons (TupleConstE (Tuple2E x xs))) = do
   let reifyX Proxy = case reifyA Proxy of
                        ListT t -> t
@@ -404,6 +405,75 @@ lineageTransform reifyA reifyK (AppE Cons (TupleConstE (Tuple2E x xs))) = do
   x'  <- lineageTransform reifyX reifyK x
   xs' <- lineageTransform reifyA reifyK xs
   return (AppE Cons (TupleConstE (Tuple2E (emptyLineageE reifyK x') xs')))
+
+lineageTransform reifyA reifyK (TupleConstE (Tuple2E a b)) = do
+  let reify1 Proxy = case reifyA Proxy of
+                       TupleT (Tuple2T t _) -> t
+                       _                    -> $impossible
+      reify2 Proxy = case reifyA Proxy of
+                       TupleT (Tuple2T _ t) -> t
+                       _                    -> $impossible
+  a' <- lineageTransform reify1 reifyK a
+  b' <- lineageTransform reify2 reifyK b
+  return (TupleConstE (Tuple2E a' b'))
+
+lineageTransform reifyA reifyK (TupleConstE (Tuple3E a b c)) = do
+  let reify1 Proxy = case reifyA Proxy of
+                       TupleT (Tuple3T t _ _) -> t
+                       _                      -> $impossible
+      reify2 Proxy = case reifyA Proxy of
+                       TupleT (Tuple3T _ t _) -> t
+                       _                      -> $impossible
+      reify3 Proxy = case reifyA Proxy of
+                       TupleT (Tuple3T _ _ t) -> t
+                       _                      -> $impossible
+  a' <- lineageTransform reify1 reifyK a
+  b' <- lineageTransform reify2 reifyK b
+  c' <- lineageTransform reify3 reifyK c
+  return (TupleConstE (Tuple3E a' b' c'))
+
+lineageTransform reifyA reifyK (TupleConstE (Tuple4E a b c d)) = do
+  let reify1 Proxy = case reifyA Proxy of
+                       TupleT (Tuple4T t _ _ _) -> t
+                       _                        -> $impossible
+      reify2 Proxy = case reifyA Proxy of
+                       TupleT (Tuple4T _ t _ _) -> t
+                       _                        -> $impossible
+      reify3 Proxy = case reifyA Proxy of
+                       TupleT (Tuple4T _ _ t _) -> t
+                       _                        -> $impossible
+      reify4 Proxy = case reifyA Proxy of
+                       TupleT (Tuple4T _ _ _ t) -> t
+                       _                        -> $impossible
+  a' <- lineageTransform reify1 reifyK a
+  b' <- lineageTransform reify2 reifyK b
+  c' <- lineageTransform reify3 reifyK c
+  d' <- lineageTransform reify4 reifyK d
+  return (TupleConstE (Tuple4E a' b' c' d'))
+
+lineageTransform reifyA reifyK (TupleConstE (Tuple5E a b c d e)) = do
+  let reify1 Proxy = case reifyA Proxy of
+                       TupleT (Tuple5T t _ _ _ _) -> t
+                       _                          -> $impossible
+      reify2 Proxy = case reifyA Proxy of
+                       TupleT (Tuple5T _ t _ _ _) -> t
+                       _                          -> $impossible
+      reify3 Proxy = case reifyA Proxy of
+                       TupleT (Tuple5T _ _ t _ _) -> t
+                       _                          -> $impossible
+      reify4 Proxy = case reifyA Proxy of
+                       TupleT (Tuple5T _ _ _ t _) -> t
+                       _                          -> $impossible
+      reify5 Proxy = case reifyA Proxy of
+                       TupleT (Tuple5T _ _ _ _ t) -> t
+                       _                          -> $impossible
+  a' <- lineageTransform reify1 reifyK a
+  b' <- lineageTransform reify2 reifyK b
+  c' <- lineageTransform reify3 reifyK c
+  d' <- lineageTransform reify4 reifyK d
+  e' <- lineageTransform reify4 reifyK e
+  return (TupleConstE (Tuple5E a' b' c' d' e'))
+-- JSTOLAREK: more tuple types, up to 16
 
 -- NOT YET IMPLEMENTED
 
@@ -487,7 +557,6 @@ lineageTransform _ _ (AppE Cons      _) = $impossible
 lineageTransform _ _ (AppE ConcatMap _) = $impossible
 lineageTransform _ _ (AppE Map       _) = $impossible
 lineageTransform _ _ (AppE Append    _) = $impossible
-lineageTransform _ _ (TupleConstE    _) = $impossible
 -- let bindings are introduced by lineageTransform so it is not possible to
 -- encounter one
 lineageTransform _ _ (LetE _ _ _) = $impossible
