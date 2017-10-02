@@ -15,13 +15,14 @@ module Database.DSH.Provenance.Lineage
       lineage, Lineage
 
       -- * Accessing data and provenance components of lineage-annotated value
---    , lineageDataQ, lineageProvQ, emptyLineageQ
+    , lineageDataQ, lineageProvQ, emptyLineageQ
     ) where
 
 import           Data.Decimal
 import           Data.Proxy
 import           Data.Text
 import           Data.Time.Calendar               (Day)
+import qualified Data.Traversable as T
 import           Data.Typeable
 import           Data.Scientific
 import qualified Data.Sequence as S
@@ -368,21 +369,18 @@ lineageTransform _ _ e@(DayE        _) = return e
 lineageTransform _ _ e@(ScientificE _) = return e
 lineageTransform _ _ e@(DecimalE    _) = return e
 
-{- JSTOLAREK: broken
-lineageTransform _ reifyK e@(ListE reifyA xs)       = do
-  xs' <- mapM (lineageTransform reifyA reifyK) xs
-  return (ListE undefined xs') -- (emptyLineageListE e)
--}
-{-
-lineageTransform reifyA reifyK e@(ListE r _) = do
-    return (emptyLineageListE r reifyK e)
+-- lists
+lineageTransform _ reifyK (ListE reifyA xs) = do
+  xs' <- T.mapM (lineageTransform reifyA reifyK) xs
+  let reifyA' Proxy = typeLT (reifyA Proxy) (reifyK Proxy)
+  return (emptyLineageListE reifyA' reifyK (ListE reifyA' xs'))
 
-lineageTransform _ e@(ListE _)        = return (emptyLineageListE e)
 {- JSTOLAREK: speculative
 lineageTransform k e@(AppE _ Guard b) = do
   b' <- lineageTransform k b
   return (lineageE (AppE Proxy Guard (lineageDataE b')) (lineageProvE b'))
 -}
+{-
 lineageTransform _ e@(AppE _ Guard _) = return (emptyLineageListE e)
 lineageTransform _ e@(AppE _ Cons (TupleConstE (Tuple2E _ _))) =
   return (emptyLineageListE e)
@@ -537,16 +535,15 @@ lineageProvE = AppE (TupElem Tup2_2)
 emptyLineageLamE :: forall a k. DReify a -> DReify k -> Integer
                  -> Exp (LineageE a k)
 emptyLineageLamE reifyA reifyK x = emptyLineageE reifyK (VarE reifyA x)
-{-
-JSTOLAREK: code broken, need to figure out how to handle lists
+
 -- | Add empty lineage to all elements in a list:
 --
 --    map (\a -> emptyLineageE a) e
 --
-emptyLineageListE :: DReify a -> DReify k -> Exp [a] -> Exp (LineageE a k)
-emptyLineageListE reifyA reifyK e = undefined
- --   AppE Map (TupleConstE (Tuple2E (LamE undefined (emptyLineageLamE reifyA reifyK)) e))
--}
+emptyLineageListE :: DReify a -> DReify k -> Exp [a] -> Exp [LineageE a k]
+emptyLineageListE reifyA reifyK e =
+    AppE Map (TupleConstE (Tuple2E
+              (LamE reifyA (emptyLineageLamE reifyA reifyK)) e))
 
 --------------------------------------------------------------------------------
 --                              SUBSTITUTION                                  --
