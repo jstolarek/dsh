@@ -375,13 +375,11 @@ lineageTransform _ reifyK (ListE reifyA xs) = do
   let reifyA' Proxy = typeLT (reifyA Proxy) (reifyK Proxy)
   return (emptyLineageListE reifyA' reifyK (ListE reifyA' xs'))
 
-{- JSTOLAREK: speculative
-lineageTransform k e@(AppE _ Guard b) = do
-  b' <- lineageTransform k b
-  return (lineageE (AppE Proxy Guard (lineageDataE b')) (lineageProvE b'))
--}
+-- guards
+lineageTransform _ reifyK e@(AppE Guard _) = do
+    return (emptyLineageListE (\Proxy -> UnitT) reifyK e)
+
 {-
-lineageTransform _ e@(AppE _ Guard _) = return (emptyLineageListE e)
 lineageTransform _ e@(AppE _ Cons (TupleConstE (Tuple2E _ _))) =
   return (emptyLineageListE e)
 
