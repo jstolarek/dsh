@@ -468,7 +468,10 @@ lineageTransform reifyA reifyK (AppE (TupElem Tup2_1) x) = do
   x' <- lineageTransform reifyA' reifyK x
   return (AppE (TupElem Tup2_1) x')
 
-lineageTransform reifyA reifyK (AppE (TupElem Tup2_2) x) = $unimplemented
+lineageTransform reifyA reifyK (AppE (TupElem Tup2_2) x) = do
+  let reifyA' Proxy = TupleT (Tuple2T undefined (reifyA Proxy))
+  x' <- lineageTransform reifyA' reifyK x
+  return (AppE (TupElem Tup2_2) x')
 
 lineageTransform reifyA reifyK (AppE (TupElem Tup3_1) x) = $unimplemented
 lineageTransform reifyA reifyK (AppE (TupElem Tup3_2) x) = $unimplemented
@@ -483,7 +486,10 @@ lineageTransform reifyA reifyK (AppE (TupElem Tup4_4) x) = do
   x' <- lineageTransform reifyA' reifyK x
   return (AppE (TupElem Tup4_4) x')
 
-lineageTransform reifyA reifyK (AppE (TupElem Tup5_1) x) = $unimplemented
+lineageTransform reifyA reifyK (AppE (TupElem Tup5_1) x) = do
+  let reifyA' Proxy = TupleT (Tuple5T (reifyA Proxy) undefined undefined undefined undefined)
+  x' <- lineageTransform reifyA' reifyK x
+  return (AppE (TupElem Tup5_1) x')
 
 lineageTransform reifyA reifyK (AppE (TupElem Tup5_2) x) = do
   let reifyA' Proxy = TupleT (Tuple5T undefined (reifyA Proxy) undefined undefined undefined)
@@ -579,7 +585,7 @@ lineageTransform _ _ (AppE Append    _) = $impossible
 -- let bindings are introduced by lineageTransform so it is not possible to
 -- encounter one
 lineageTransform _ _ (LetE _ _ _) = $impossible
--- JSTOLAREK: think about lambdas
+-- Lambdas should only appear inside AppE arguments
 lineageTransform _ _ (LamE _ _  ) = $impossible
 
 --------------------------------------------------------------------------------
