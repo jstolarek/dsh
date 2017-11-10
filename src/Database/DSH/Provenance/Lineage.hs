@@ -214,19 +214,10 @@ typeLT (ArrowT fun arg) _ = (ArrowT fun arg)
 typeLT (ListT lt) kt =
     ListT (TupleT $ Tuple2T (typeLT lt kt)
                       (ListT (TupleT $ Tuple2T TextT kt)))
--- JSTOLAREK: generate this with TH
-typeLT (TupleT (Tuple2T a b)) kt =
-    TupleT (Tuple2T (typeLT a kt) (typeLT b kt))
-typeLT (TupleT (Tuple3T a b c)) kt =
-    TupleT (Tuple3T (typeLT a kt) (typeLT b kt) (typeLT c kt))
-typeLT (TupleT (Tuple4T a b c d)) kt =
-    TupleT (Tuple4T (typeLT a kt) (typeLT b kt) (typeLT c kt) (typeLT d kt))
-typeLT (TupleT (Tuple5T a b c d e)) kt =
-    TupleT (Tuple5T (typeLT a kt) (typeLT b kt) (typeLT c kt) (typeLT d kt)
-                    (typeLT e kt))
--- JSTOLAREK: add tuple support up to 16, use TH
-typeLT _ _ = $unimplemented
-
+typeLT (TupleT t) k =
+    let typeLTTuple :: TupleType a -> Type (LineageTransform a k)
+        typeLTTuple = $(mkTypeLT 'k 16)
+    in typeLTTuple t
 
 reifyLT :: forall a k. DReify a -> DReify k -> DReify (LineageTransform a k)
 reifyLT ra rb Proxy = typeLT (ra Proxy) (rb Proxy)

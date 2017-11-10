@@ -19,6 +19,7 @@ module Database.DSH.Frontend.TupleTypes
     , mkAddWhereProvenance
     , mkLineageTransformTupleRHS
     , mkQLTTupleInstances
+    , mkTypeLT
     , mkLineageTransformTupleConst
     -- * Helper functions
     , innerConst
@@ -651,6 +652,11 @@ mkLineageTransformTupleRHS names k = do
         tupleComponents = map tfCall names
     return (tupleType tupleComponents)
 
+-- instance (QLT a1, ..., QLT an) => QLT (a1, ..., an) where
+--    type LT (a1, ..., an) k = (LT a1 k, ..., LT an k)
+--    ltEq _ k =
+--         case (ltEq (Proxy :: Proxy a1) k, ..., ltEq (Proxy :: Proxy an) k) of
+--           (Refl, Refl) -> Refl
 mkQLTTupleInstances :: Int -> Q [Dec]
 mkQLTTupleInstances maxWidth =
   mapM mkQLTTupleInstance [2..maxWidth]
@@ -662,7 +668,7 @@ mkQLTTupleInstance n = do
   let qlt t   = AppT (ConT (mkName "QLT")) t
       -- (QLT a1, ..., QLT an)
       qltCtx  = map (\name -> qlt (VarT name)) ns
-      -- (QLT (a1, ..., an)
+      -- QLT (a1, ..., an)
       qltHead = qlt (tupleType (map (\name -> VarT name) ns))
       -- type instance LT (a1, ..., an) k = (LT a1 k, ..., LT an k)
       ltDec   = TySynInstD (mkName "LT") (TySynEqn
@@ -682,6 +688,27 @@ mkQLTTupleInstance n = do
                         (NormalB (ConE 'Refl)) []]) []]
 
   return (InstanceD Nothing qltCtx qltHead [ltDec, lteqDec])
+
+-- case tupleT of
+--   Tuple2T a1 a2 -> TupleT (Tuple2T (typeLT a1 k) (typeLT a2 k))
+--   ....
+--   TupleNT a1 ... an -> TupleT (TupleNT (typeLT a1 k) ... (typeLT an k))
+mkTypeLT :: Name -> Int -> Q Exp
+mkTypeLT k maxWidth = do
+    tyName     <- newName "tupleT"
+    matches    <- mapM (mkTypeLTMatch k) [2..maxWidth]
+    let lamBody = CaseE (VarE tyName) matches
+    return $ LamE [VarP tyName] lamBody
+
+mkTypeLTMatch :: Name -> Int -> Q Match
+mkTypeLTMatch k n = do
+  ns <- mkNames "a" n
+  let pat = ConP (tupTyConstName "" n) (map VarP ns)
+      typeLTs = map (\name -> AppE (AppE (VarE (mkName "typeLT"))
+                                         (VarE name)) (VarE k)) ns
+      bodyE = AppE (ConE (mkName "TupleT"))
+                   (foldl' AppE (ConE (tupTyConstName "" n)) typeLTs)
+  return (Match pat (NormalB bodyE) [])
 
 -- Transformation of TupleConst constructors
 mkLineageTransformTupleConst :: Name -> Name -> Int -> Q Exp
