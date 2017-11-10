@@ -639,6 +639,16 @@ mkWhereProvenanceMatch row provColumns keyIndices width = do
 -- Lineage transformation for tuples                      --
 ------------------------------------------------------------
 
+-- RHS of LineageTransform type family for tuples
+--
+-- (LineageTransform a1 k, ..., LineageTransform aN k)
+mkLineageTransformTupleRHS :: [Name] -> Name -> Q Type
+mkLineageTransformTupleRHS names k = do
+    let tfCall p = AppT (AppT (ConT (mkName "LineageTransform")) (VarT p))
+                              (VarT k)
+        tupleComponents = map tfCall names
+    return (tupleType tupleComponents)
+
 -- Transformation of TupleConst constructors
 mkLineageTransformTupleConst :: Name -> Name -> Int -> Q Exp
 mkLineageTransformTupleConst reifyA reifyK maxWidth = do
@@ -701,14 +711,6 @@ mkLineageTransformTermMatch reifyA reifyK width = do
   return (Match (ConP (innerConst "" width) (map VarP tupNames))
                     (NormalB $ DoE $ [LetS reifyDecs] ++ recCalls ++ [retStmt])
                     [])
-
--- RHS of LineageTransform type family for tuples
-mkLineageTransformTupleRHS :: [Name] -> Name -> Q Type
-mkLineageTransformTupleRHS names k = do
-    let tfCall p = AppT (AppT (ConT (mkName "LineageTransform")) (VarT p))
-                              (VarT k)
-        tupleComponents = map tfCall names
-    return (tupleType tupleComponents)
 
 --------------------------------------------------------------------------------
 -- Helper functions
