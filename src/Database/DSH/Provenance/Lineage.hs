@@ -12,7 +12,7 @@
 
 module Database.DSH.Provenance.Lineage
     ( -- * Lineage transformation and data type
-      lineage, Lineage, QLTable(..)
+      lineage, Lineage, QLT(..)
 
       -- * Accessing data and provenance components of lineage-annotated value
     , lineageDataQ, lineageProvQ, emptyLineageQ
@@ -140,94 +140,58 @@ type family LineageTransform a k = r | r -> a where
                                      , ''i, ''j, ''k, ''l, ''m, ''n, ''o, ''p]
           ''t)
 
-class (QA a) => QLTable a where
+class (QA a) => QLT a where
     type family LT a k
     ltEq :: forall k. (QA k) => Proxy a -> Proxy k
          -> LineageTransform (Rep a) (Rep k) :~: Rep (LT a k)
 
-instance QLTable () where
+instance QLT () where
     type LT () k = ()
     ltEq _ _ = Refl
 
-instance QLTable Bool where
+instance QLT Bool where
     type LT Bool k = Bool
     ltEq _ _ = Refl
 
-instance QLTable Char where
+instance QLT Char where
     type LT Char k = Char
     ltEq _ _ = Refl
 
-instance QLTable Integer where
+instance QLT Integer where
     type LT Integer k = Integer
     ltEq _ _ = Refl
 
-instance QLTable Double where
+instance QLT Double where
     type LT Double k = Double
     ltEq _ _ = Refl
 
-instance QLTable Text where
+instance QLT Text where
     type LT Text k = Text
     ltEq _ _ = Refl
 
-instance QLTable Decimal where
+instance QLT Decimal where
     type LT Decimal k = Decimal
     ltEq _ _ = Refl
 
-instance QLTable Scientific where
+instance QLT Scientific where
     type LT Scientific k = Scientific
     ltEq _ _ = Refl
 
-instance QLTable Day where
+instance QLT Day where
     type LT Day k = Day
     ltEq _ _ = Refl
 
-instance QLTable a => QLTable [a] where
+instance QLT a => QLT [a] where
     type LT [a] k = [Lineage (LT a k) k]
     ltEq _ k = case ltEq (Proxy :: Proxy a) k of
                  Refl -> Refl
 
--- JSTOLAREK: generate these with TH
-instance (QLTable a, QLTable b) => QLTable (a, b) where
-    type LT (a, b) k = (LT a k, LT b k)
-    ltEq _ k = case (ltEq (Proxy :: Proxy a) k, ltEq (Proxy :: Proxy b) k) of
-                 (Refl, Refl) -> Refl
-
-instance (QLTable a, QLTable b, QLTable c)
-    => QLTable (a, b, c) where
-    type LT (a, b, c) k = (LT a k, LT b k, LT c k)
-    ltEq _ k =
-        let ltEqA = ltEq (Proxy :: Proxy a) k
-            ltEqB = ltEq (Proxy :: Proxy b) k
-            ltEqC = ltEq (Proxy :: Proxy c) k
-        in case (ltEqA, ltEqB, ltEqC) of
-             (Refl, Refl, Refl) -> Refl
-
-instance (QLTable a, QLTable b, QLTable c, QLTable d)
-    => QLTable (a, b, c, d) where
-    type LT (a, b, c, d) k = (LT a k, LT b k, LT c k, LT d k)
-    ltEq _ k =
-        let ltEqA = ltEq (Proxy :: Proxy a) k
-            ltEqB = ltEq (Proxy :: Proxy b) k
-            ltEqC = ltEq (Proxy :: Proxy c) k
-            ltEqD = ltEq (Proxy :: Proxy d) k
-        in case (ltEqA, ltEqB, ltEqC, ltEqD) of
-             (Refl, Refl, Refl, Refl) -> Refl
-
-instance (QLTable a, QLTable b, QLTable c, QLTable d, QLTable e)
-    => QLTable (a, b, c, d, e) where
-    type LT (a, b, c, d, e) k = (LT a k, LT b k, LT c k, LT d k, LT e k)
-    ltEq _ k =
-        let ltEqA = ltEq (Proxy :: Proxy a) k
-            ltEqB = ltEq (Proxy :: Proxy b) k
-            ltEqC = ltEq (Proxy :: Proxy c) k
-            ltEqD = ltEq (Proxy :: Proxy d) k
-            ltEqE = ltEq (Proxy :: Proxy e) k
-        in case (ltEqA, ltEqB, ltEqC, ltEqD, ltEqE) of
-             (Refl, Refl, Refl, Refl, Refl) -> Refl
+-- QLT instances for tuples
+$(mkQLTTupleInstances 16)
 
 -- | Perform lineage transformation on a query
 lineage :: forall a k.
-           ( Reify (Rep a), QA k, Typeable (Rep k), QLTable a
+           ( Reify (Rep a), QA k, Typeable (Rep k), QLT a
            , Reify (LineageTransform (Rep a) (Rep k)) )
         => Proxy k -> Q a -> Q (LT a k)
 lineage pk (Q a) =
@@ -441,8 +405,7 @@ lineageTransform reifyA reifyK (AppE Cons (TupleConstE (Tuple2E x xs))) = do
 
 lineageTransform reifyA reifyK (TupleConstE tupleE) = do
    let lineageTransformTupleConst =
-           -- JSTOLAREK: should be up to 16 but requires type family definitions
-           $(mkLineageTransformTupleConst 'reifyA 'reifyK 5)
+           $(mkLineageTransformTupleConst 'reifyA 'reifyK 16)
    lineageTransformTupleConst tupleE
 
 -- JSTOLAREK: generate this with TH

@@ -18,6 +18,7 @@ module Database.DSH.Frontend.TupleTypes
     , mkSubstTuple
     , mkAddWhereProvenance
     , mkLineageTransformTupleRHS
+    , mkQLTTupleInstances
     , mkLineageTransformTupleConst
     -- * Helper functions
     , innerConst
@@ -31,6 +32,7 @@ module Database.DSH.Frontend.TupleTypes
 import           Data.List
 import           Data.Proxy
 import           Data.Text   (Text)
+import           Data.Type.Equality
 import           Text.Printf
 
 import           Language.Haskell.TH
@@ -649,13 +651,43 @@ mkLineageTransformTupleRHS names k = do
         tupleComponents = map tfCall names
     return (tupleType tupleComponents)
 
+mkQLTTupleInstances :: Int -> Q [Dec]
+mkQLTTupleInstances maxWidth =
+  mapM mkQLTTupleInstance [2..maxWidth]
+
+mkQLTTupleInstance :: Int -> Q Dec
+mkQLTTupleInstance n = do
+  ns <- mkNames "a" n
+  k  <- newName "k"
+  let qlt t   = AppT (ConT (mkName "QLT")) t
+      -- (QLT a1, ..., QLT an)
+      qltCtx  = map (\name -> qlt (VarT name)) ns
+      -- (QLT (a1, ..., an)
+      qltHead = qlt (tupleType (map (\name -> VarT name) ns))
+      -- type instance LT (a1, ..., an) k = (LT a1 k, ..., LT an k)
+      ltDec   = TySynInstD (mkName "LT") (TySynEqn
+                 [tupleType (map VarT ns), VarT k]
+                 (tupleType (map (\name -> foldl' AppT (ConT (mkName "LT"))
+                                                 [VarT name, VarT k] ) ns)))
+      -- ltEq _ k =
+      --   case (ltEq (Proxy :: Proxy a1) k, ..., ltEq (Proxy :: Proxy an) k) of
+      --     (Refl, Refl) -> Refl
+      proxy name = foldl' AppE (VarE (mkName "ltEq"))
+                         [ SigE (ConE 'Proxy) (AppT (ConT ''Proxy) (VarT name))
+                         , VarE k]
+      scrutinee  = TupE (map proxy ns)
+      lteqDec = FunD (mkName "ltEq") [Clause [WildP, VarP k]
+               (NormalB $ CaseE scrutinee
+                 [Match (TupP (map (const (ConP 'Refl [])) ns))
+                        (NormalB (ConE 'Refl)) []]) []]
+
+  return (InstanceD Nothing qltCtx qltHead [ltDec, lteqDec])
+
 -- Transformation of TupleConst constructors
 mkLineageTransformTupleConst :: Name -> Name -> Int -> Q Exp
 mkLineageTransformTupleConst reifyA reifyK maxWidth = do
     lamArgName <- newName "tupleE"
-
     matches    <- mapM (mkLineageTransformTermMatch reifyA reifyK) [2..maxWidth]
-
     let lamBody = CaseE (VarE lamArgName) matches
     return $ LamE [VarP lamArgName] lamBody
 
@@ -672,8 +704,8 @@ mkLineageTransformTupleConst reifyA reifyK maxWidth = do
 mkLineageTransformTermMatch :: Name -> Name -> Int -> Q Match
 mkLineageTransformTermMatch reifyA reifyK width = do
   reifyPatName <- newName "t"
-  tupNames  <- mapM (\_ -> newName "a") [1..width]
-  tupNames' <- mapM (\_ -> newName "b") [1..width]
+  tupNames  <- mkNames "a" width
+  tupNames' <- mkNames "b" width
 
   let reifyName :: Int -> Name
       reifyName n = mkName $ "reify" ++ show n
@@ -763,3 +795,6 @@ mkTupConstTerm ts
     | length ts <= 16 = return $ AppE (ConE $ mkName "TupleConstE")
                                $ foldl' AppE (ConE $ innerConst "" $ length ts) ts
     | otherwise       = impossible
+
+mkNames :: String -> Int -> Q [Name]
+mkNames a width = mapM (\_ -> newName a) [1..width]
