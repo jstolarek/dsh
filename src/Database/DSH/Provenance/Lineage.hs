@@ -99,6 +99,7 @@ type family LineageTransform a k = r | r -> a where
     LineageTransform Day        k =  Day
     LineageTransform (a -> b)   k =  a -> b
     LineageTransform [a]        k = [LineageE (LineageTransform a k) k]
+    -- JSTOLAREK: generate this with TH?
     LineageTransform (a,b)      k = ( LineageTransform a k, LineageTransform b k)
     LineageTransform (a,b,c)    k = ( LineageTransform a k, LineageTransform b k
                                     , LineageTransform c k)
@@ -155,6 +156,7 @@ instance QLTable a => QLTable [a] where
     ltEq _ k = case ltEq (Proxy :: Proxy a) k of
                  Refl -> Refl
 
+-- JSTOLAREK: generate these with TH
 instance (QLTable a, QLTable b) => QLTable (a, b) where
     type LT (a, b) k = (LT a k, LT b k)
     ltEq _ k = case (ltEq (Proxy :: Proxy a) k, ltEq (Proxy :: Proxy b) k) of
@@ -218,6 +220,7 @@ typeLT (ArrowT fun arg) _ = (ArrowT fun arg)
 typeLT (ListT lt) kt =
     ListT (TupleT $ Tuple2T (typeLT lt kt)
                       (ListT (TupleT $ Tuple2T TextT kt)))
+-- JSTOLAREK: generate this with TH
 typeLT (TupleT (Tuple2T a b)) kt =
     TupleT (Tuple2T (typeLT a kt) (typeLT b kt))
 typeLT (TupleT (Tuple3T a b c)) kt =
@@ -406,63 +409,13 @@ lineageTransform reifyA reifyK (AppE Cons (TupleConstE (Tuple2E x xs))) = do
   xs' <- lineageTransform reifyA reifyK xs
   return (AppE Cons (TupleConstE (Tuple2E (emptyLineageE reifyK x') xs')))
 
-lineageTransform reifyA reifyK (TupleConstE (Tuple2E a b)) = do
-  let reify1 Proxy = case reifyA Proxy of
-                       TupleT (Tuple2T t _) -> t
-      reify2 Proxy = case reifyA Proxy of
-                       TupleT (Tuple2T _ t) -> t
-  a' <- lineageTransform reify1 reifyK a
-  b' <- lineageTransform reify2 reifyK b
-  return (TupleConstE (Tuple2E a' b'))
+lineageTransform reifyA reifyK (TupleConstE tupleE) = do
+   let lineageTransformTupleConst =
+           -- JSTOLAREK: should be up to 16 but requires type family definitions
+           $(mkLineageTransformTupleConst 'reifyA 'reifyK 5)
+   lineageTransformTupleConst tupleE
 
-lineageTransform reifyA reifyK (TupleConstE (Tuple3E a b c)) = do
-  let reify1 Proxy = case reifyA Proxy of
-                       TupleT (Tuple3T t _ _) -> t
-      reify2 Proxy = case reifyA Proxy of
-                       TupleT (Tuple3T _ t _) -> t
-      reify3 Proxy = case reifyA Proxy of
-                       TupleT (Tuple3T _ _ t) -> t
-  a' <- lineageTransform reify1 reifyK a
-  b' <- lineageTransform reify2 reifyK b
-  c' <- lineageTransform reify3 reifyK c
-  return (TupleConstE (Tuple3E a' b' c'))
-
-lineageTransform reifyA reifyK (TupleConstE (Tuple4E a b c d)) = do
-  let reify1 Proxy = case reifyA Proxy of
-                       TupleT (Tuple4T t _ _ _) -> t
-      reify2 Proxy = case reifyA Proxy of
-                       TupleT (Tuple4T _ t _ _) -> t
-      reify3 Proxy = case reifyA Proxy of
-                       TupleT (Tuple4T _ _ t _) -> t
-      reify4 Proxy = case reifyA Proxy of
-                       TupleT (Tuple4T _ _ _ t) -> t
-  a' <- lineageTransform reify1 reifyK a
-  b' <- lineageTransform reify2 reifyK b
-  c' <- lineageTransform reify3 reifyK c
-  d' <- lineageTransform reify4 reifyK d
-  return (TupleConstE (Tuple4E a' b' c' d'))
-
-lineageTransform reifyA reifyK (TupleConstE (Tuple5E a b c d e)) = do
-  let reify1 Proxy = case reifyA Proxy of
-                       TupleT (Tuple5T t _ _ _ _) -> t
-      reify2 Proxy = case reifyA Proxy of
-                       TupleT (Tuple5T _ t _ _ _) -> t
-      reify3 Proxy = case reifyA Proxy of
-                       TupleT (Tuple5T _ _ t _ _) -> t
-      reify4 Proxy = case reifyA Proxy of
-                       TupleT (Tuple5T _ _ _ t _) -> t
-      reify5 Proxy = case reifyA Proxy of
-                       TupleT (Tuple5T _ _ _ _ t) -> t
-  a' <- lineageTransform reify1 reifyK a
-  b' <- lineageTransform reify2 reifyK b
-  c' <- lineageTransform reify3 reifyK c
-  d' <- lineageTransform reify4 reifyK d
-  e' <- lineageTransform reify5 reifyK e
-  return (TupleConstE (Tuple5E a' b' c' d' e'))
-
--- JSTOLAREK: more tuple types, up to 16
-lineageTransform _ _ (TupleConstE _ ) = $unimplemented
-
+-- JSTOLAREK: generate this with TH
 lineageTransform reifyA reifyK (AppE (TupElem Tup2_1) x) = do
   let reifyA' Proxy = TupleT (Tuple2T (reifyA Proxy) undefined)
   x' <- lineageTransform reifyA' reifyK x

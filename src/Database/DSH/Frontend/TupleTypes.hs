@@ -17,6 +17,7 @@ module Database.DSH.Frontend.TupleTypes
     , mkTupleAstComponents
     , mkSubstTuple
     , mkAddWhereProvenance
+    , mkLineageTransformTupleConst
     -- * Helper functions
     , innerConst
     , outerConst
@@ -27,6 +28,7 @@ module Database.DSH.Frontend.TupleTypes
     ) where
 
 import           Data.List
+import           Data.Proxy
 import           Data.Text   (Text)
 import           Text.Printf
 
@@ -304,7 +306,7 @@ mkTupleAccessor width idx = do
 --
 -- @
 -- tup<n>_<i> :: (QA t1, ..., QA t_n) => Q (t_1, ..., t_n) -> Q t_i
--- tup<n>_<i> (Q e) = Q (AppE Proxy (TupElem Tup<n>_<i>) e)
+-- tup<n>_<i> (Q e) = Q (AppE (TupElem Tup<n>_<i>) e)
 -- @
 mkTupleAccessors :: Int -> Q [Dec]
 mkTupleAccessors maxWidth = concat <$> sequence [ mkTupleAccessor width idx
@@ -631,6 +633,63 @@ mkWhereProvenanceMatch row provColumns keyIndices width = do
   return $ Match (LitP $ IntegerL width)
                  (NormalB (LetE (tupElemDecs ++ [tupElemsDec, keyDec, colsDec])
                           letBody)) []
+
+------------------------------------------------------------
+-- Lineage transformation for tuples                      --
+------------------------------------------------------------
+
+mkLineageTransformTupleConst :: Name -> Name -> Int -> Q Exp
+mkLineageTransformTupleConst reifyA reifyK maxWidth = do
+    lamArgName <- newName "tupleE"
+
+    matches    <- mapM (mkLineageTransformTermMatch reifyA reifyK) [2..maxWidth]
+
+    let lamBody = CaseE (VarE lamArgName) matches
+    return $ LamE [VarP lamArgName] lamBody
+
+mkLineageTransformTermMatch :: Name -> Name -> Int -> Q Match
+mkLineageTransformTermMatch reifyA reifyK width = do
+  reifyPatName <- newName "t"
+  tupNames  <- mapM (\_ -> newName "a") [1..width]
+  tupNames' <- mapM (\_ -> newName "b") [1..width]
+
+  let reifyName :: Int -> Name
+      reifyName n = mkName $ "reify" ++ show n
+
+      mkPats :: Int -> Int -> [Pat] -> [Pat]
+      mkPats n m acc | n == m    = mkPats n (m - 1) (VarP reifyPatName : acc)
+                     | m == 0    = acc
+                     | otherwise = mkPats n (m - 1) (WildP : acc)
+
+      -- reifyN Proxy = match reifyA Proxy with
+      --                  TupleT (TupleN _ ... n ... _) -> n
+      reifyBody :: Int -> Dec
+      reifyBody n = FunD (reifyName n)
+        [ Clause [ConP 'Data.Proxy.Proxy []]
+          (NormalB $ CaseE (AppE (VarE reifyA) (ConE 'Data.Proxy.Proxy))
+            [Match (ConP (mkName "TupleT") [ConP (tupTyConstName "" width)
+                                           (mkPats n width [])])
+                       (NormalB $ VarE reifyPatName) []]) []]
+
+      reifyDecs = map reifyBody [1..width]
+
+      mkRecCall :: (Name, Name, Int) -> Stmt
+      mkRecCall (a, a', n) =
+          BindS (VarP a')
+                -- "lineageTransform" - fragile!
+                (AppE (AppE (AppE (VarE (mkName "lineageTransform"))
+                                  (VarE (reifyName n))) (VarE reifyK)) (VarE a))
+
+      recCalls = map mkRecCall (zip3 tupNames tupNames' [1..])
+
+  retTuple <- mkTupConstTerm (map VarE tupNames')
+
+  let retStmt = NoBindS (AppE (VarE 'Prelude.return) retTuple)
+
+  return (Match (ConP (innerConst "" width) (map VarP tupNames))
+                    (NormalB $ DoE $ [LetS reifyDecs] ++ recCalls ++ [retStmt])
+                    [])
+
 
 --------------------------------------------------------------------------------
 -- Helper functions
