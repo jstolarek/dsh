@@ -4,6 +4,7 @@ module Database.DSH.Frontend.TH
     ( deriveDSH
     , deriveQA
     , deriveTA
+    , deriveQLTInstance
     , deriveView
     , deriveElim
     , deriveSmartConstructors
@@ -18,6 +19,7 @@ module Database.DSH.Frontend.TH
 import           Control.Monad
 import           Data.Char
 import           Data.List
+import           Data.Type.Equality
 
 import           Language.Haskell.TH
 import           Language.Haskell.TH.Syntax
@@ -43,7 +45,8 @@ deriveDSH n = do
                   then deriveView n
                   else return []
   scDecs    <- deriveSmartConstructors n
-  return (qaDecs {- ++ elimDecs -} ++ viewDecs ++ scDecs)
+  qltDec    <- deriveQLTInstance n
+  return (qaDecs {- ++ elimDecs -} ++ viewDecs ++ scDecs ++ [qltDec])
 
 -----------------
 -- Deriving QA --
@@ -206,6 +209,21 @@ deriveTyConTA name tyVarBndrs _cons = do
   let typ           = foldl AppT (ConT name) (map (VarT . tyVarBndrToName) tyVarBndrs)
   let instanceHead  = AppT (ConT ''DSH.TA) typ
   return [InstanceD Nothing context instanceHead []]
+
+------------------
+-- Deriving QLT --
+------------------
+
+deriveQLTInstance :: Name -> Q Dec
+deriveQLTInstance n = do
+  k  <- newName "k"
+  let qltHead = AppT (ConT (mkName "QLT")) (ConT n)
+      -- type instance LT n
+      ltDec   = TySynInstD (mkName "LT") (TySynEqn [ConT n, VarT k] (ConT n))
+      -- ltEq _ _ = Refl
+      lteqDec = FunD (mkName "ltEq")
+                     [Clause [WildP, WildP] (NormalB (ConE 'Refl)) []]
+  return (InstanceD Nothing [] qltHead [ltDec, lteqDec])
 
 -------------------
 -- Deriving View --

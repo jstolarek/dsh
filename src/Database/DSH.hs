@@ -16,6 +16,7 @@ module Database.DSH
     ( module Database.DSH.Frontend.Externals
     , module Database.DSH.Frontend.Internals
     , module Database.DSH.Frontend.TH
+    , module Database.DSH.Provenance
     , module Data.Proxy
     , module Data.String
     , module Data.Text
@@ -29,6 +30,7 @@ import Database.DSH.Frontend.Internals
     ( Q, unQ, QA, TA, Elim, elim, View, view, Key(..), TableHints(..)
     , Emptiness(..), Provenance(..) )
 import Database.DSH.Frontend.TH
+import Database.DSH.Provenance ( QLT(..) )
 
 import Data.Proxy (Proxy)
 import Data.String (IsString,fromString)
