@@ -21,6 +21,7 @@ module Database.DSH.Frontend.TupleTypes
     , mkQLTTupleInstances
     , mkTypeLT
     , mkLineageTransformTupleConst
+    , mkLineageTransformTupElem
     -- * Helper functions
     , innerConst
     , outerConst
@@ -30,6 +31,7 @@ module Database.DSH.Frontend.TupleTypes
     , tupTyConstName
     ) where
 
+import           Control.Monad
 import           Data.List
 import           Data.Proxy
 import           Data.Text   (Text)
@@ -770,6 +772,57 @@ mkLineageTransformTermMatch reifyA reifyK width = do
   return (Match (ConP (innerConst "" width) (map VarP tupNames))
                     (NormalB $ DoE $ [LetS reifyDecs] ++ recCalls ++ [retStmt])
                     [])
+
+-- \tupElem -> case tupElem of
+--    Tup2_1 -> do let reifyA' Proxy = TupleT (Tuple2T (reifyA Proxy) undefined)
+--                 arg' <- lineageTransform reifyA' reifyK arg
+--                 return (AppE (TupElem Tup2_1) arg')
+--
+--    TupN_M -> do let reifyA' Proxy = TupleT (TupleNT undefined ...
+--                                              (reifyA Proxy) ... undefined)
+--                 arg' <- lineageTransform reifyA' reifyK arg
+--                 return (AppE (TupElem TupN_M) arg')
+mkLineageTransformTupElem :: Name -> Name -> Name -> Int -> Q Exp
+mkLineageTransformTupElem reifyA reifyK arg maxWidth = do
+    lamArgName <- newName "tupElem"
+    matches    <-
+        liftM concat (mapM (mkLineageTransformTupElemMatches reifyA reifyK arg)
+                           [2..maxWidth])
+    let lamBody = CaseE (VarE lamArgName) matches
+    return $ LamE [VarP lamArgName] lamBody
+
+mkLineageTransformTupElemMatches :: Name -> Name -> Name -> Int -> Q [Match]
+mkLineageTransformTupElemMatches reifyA reifyK arg n =
+    mapM (mkLineageTransformTupElemMatch reifyA reifyK arg n) [1..n]
+
+mkLineageTransformTupElemMatch :: Name -> Name -> Name -> Int -> Int -> Q Match
+mkLineageTransformTupElemMatch reifyA reifyK arg n m = do
+  reifyA' <- newName "reifyA"
+  arg'    <- newName "arg"
+  let -- undefined ... (reifyA Proxy) ... undefined
+      -- l positions, call to (reifyA Proxy) on k-th
+      mkExps :: Int -> Int -> [Exp] -> [Exp]
+      mkExps k l acc | k == l    = mkExps k (l - 1) (AppE (VarE reifyA)
+                                                          (ConE 'Proxy) : acc)
+                     | l == 0    = acc
+                     | otherwise = mkExps k (l - 1) (VarE 'undefined : acc)
+
+      letSt = LetS [FunD reifyA' [Clause [ConP 'Proxy []]
+                   (NormalB (AppE (ConE (mkName "TupleT"))
+                      (foldl' AppE (ConE (tupTyConstName "" n)) (mkExps m n []))))
+                   []]]
+      ltCallSt =
+          BindS (VarP arg')
+                -- "lineageTransform" - fragile!
+                (AppE (AppE (AppE (VarE (mkName "lineageTransform"))
+                                  (VarE reifyA')) (VarE reifyK)) (VarE arg))
+
+  retE <- mkTupElemTerm n m (VarE arg')
+
+  let retSt = NoBindS (AppE (VarE 'Prelude.return) retE)
+
+  return (Match (ConP (tupAccName n m) [])
+                (NormalB (DoE [letSt, ltCallSt, retSt])) [])
 
 --------------------------------------------------------------------------------
 -- Helper functions

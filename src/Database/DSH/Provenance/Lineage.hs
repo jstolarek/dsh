@@ -399,44 +399,10 @@ lineageTransform reifyA reifyK (TupleConstE tupleE) = do
            $(mkLineageTransformTupleConst 'reifyA 'reifyK 16)
    lineageTransformTupleConst tupleE
 
--- JSTOLAREK: generate this with TH
-lineageTransform reifyA reifyK (AppE (TupElem Tup2_1) x) = do
-  let reifyA' Proxy = TupleT (Tuple2T (reifyA Proxy) undefined)
-  x' <- lineageTransform reifyA' reifyK x
-  return (AppE (TupElem Tup2_1) x')
-
-lineageTransform reifyA reifyK (AppE (TupElem Tup2_2) x) = do
-  let reifyA' Proxy = TupleT (Tuple2T undefined (reifyA Proxy))
-  x' <- lineageTransform reifyA' reifyK x
-  return (AppE (TupElem Tup2_2) x')
-
-lineageTransform reifyA reifyK (AppE (TupElem Tup3_1) x) = $unimplemented
-lineageTransform reifyA reifyK (AppE (TupElem Tup3_2) x) = $unimplemented
-lineageTransform reifyA reifyK (AppE (TupElem Tup3_3) x) = $unimplemented
-
-lineageTransform reifyA reifyK (AppE (TupElem Tup4_1) x) = $unimplemented
-lineageTransform reifyA reifyK (AppE (TupElem Tup4_2) x) = $unimplemented
-lineageTransform reifyA reifyK (AppE (TupElem Tup4_3) x) = $unimplemented
-
-lineageTransform reifyA reifyK (AppE (TupElem Tup4_4) x) = do
-  let reifyA' Proxy = TupleT (Tuple4T undefined undefined undefined (reifyA Proxy))
-  x' <- lineageTransform reifyA' reifyK x
-  return (AppE (TupElem Tup4_4) x')
-
-lineageTransform reifyA reifyK (AppE (TupElem Tup5_1) x) = do
-  let reifyA' Proxy = TupleT (Tuple5T (reifyA Proxy) undefined undefined undefined undefined)
-  x' <- lineageTransform reifyA' reifyK x
-  return (AppE (TupElem Tup5_1) x')
-
-lineageTransform reifyA reifyK (AppE (TupElem Tup5_2) x) = do
-  let reifyA' Proxy = TupleT (Tuple5T undefined (reifyA Proxy) undefined undefined undefined)
-  x' <- lineageTransform reifyA' reifyK x
-  return (AppE (TupElem Tup5_2) x')
-
-lineageTransform reifyA reifyK (AppE (TupElem Tup5_3) x) = $unimplemented
-lineageTransform reifyA reifyK (AppE (TupElem Tup5_4) x) = $unimplemented
-lineageTransform reifyA reifyK (AppE (TupElem Tup5_5) x) = $unimplemented
-
+lineageTransform reifyA reifyK (AppE (TupElem t) arg) = do
+    let lineageTransformTupElem =
+            $(mkLineageTransformTupElem 'reifyA 'reifyK 'arg 16)
+    lineageTransformTupElem t
 
 -- NOT YET IMPLEMENTED
 
