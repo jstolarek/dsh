@@ -17,6 +17,7 @@ module Database.DSH.Frontend.TupleTypes
     , mkTupleAstComponents
     , mkSubstTuple
     , mkAddWhereProvenance
+    , mkLineageTransformTupleRHS
     , mkLineageTransformTupleConst
     -- * Helper functions
     , innerConst
@@ -638,6 +639,7 @@ mkWhereProvenanceMatch row provColumns keyIndices width = do
 -- Lineage transformation for tuples                      --
 ------------------------------------------------------------
 
+-- Transformation of TupleConst constructors
 mkLineageTransformTupleConst :: Name -> Name -> Int -> Q Exp
 mkLineageTransformTupleConst reifyA reifyK maxWidth = do
     lamArgName <- newName "tupleE"
@@ -647,6 +649,16 @@ mkLineageTransformTupleConst reifyA reifyK maxWidth = do
     let lamBody = CaseE (VarE lamArgName) matches
     return $ LamE [VarP lamArgName] lamBody
 
+-- TupleNE a1 ... aN = do
+--    let reify1 = case reifyA Proxy of
+--                   TupleT (TupleNT t ... _) -> t
+--        ...
+--        reifyN = case reifyA Proxy of
+--                   TupleT (TupleNT _ ... t) -> t
+--     a1' <- lineageTransform reify1 reifyK a1
+--     --
+--     aN' <- lineageTransform reifyN reifyK aN
+--     return (TupleConstE (TupleNE a1' ... aN')
 mkLineageTransformTermMatch :: Name -> Name -> Int -> Q Match
 mkLineageTransformTermMatch reifyA reifyK width = do
   reifyPatName <- newName "t"
@@ -690,6 +702,13 @@ mkLineageTransformTermMatch reifyA reifyK width = do
                     (NormalB $ DoE $ [LetS reifyDecs] ++ recCalls ++ [retStmt])
                     [])
 
+-- RHS of LineageTransform type family for tuples
+mkLineageTransformTupleRHS :: [Name] -> Name -> Q Type
+mkLineageTransformTupleRHS names k = do
+    let tfCall p = AppT (AppT (ConT (mkName "LineageTransform")) (VarT p))
+                              (VarT k)
+        tupleComponents = map tfCall names
+    return (tupleType tupleComponents)
 
 --------------------------------------------------------------------------------
 -- Helper functions

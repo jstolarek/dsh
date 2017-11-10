@@ -88,27 +88,57 @@ type LineageE a k = (a, LineageAnnotE k)
 type LineageAnnotE k = [(Text, k)]
 
 type family LineageTransform a k = r | r -> a where
-    LineageTransform ()         k =  ()
-    LineageTransform Bool       k =  Bool
-    LineageTransform Char       k =  Char
-    LineageTransform Integer    k =  Integer
-    LineageTransform Double     k =  Double
-    LineageTransform Text       k =  Text
-    LineageTransform Decimal    k =  Decimal
-    LineageTransform Scientific k =  Scientific
-    LineageTransform Day        k =  Day
-    LineageTransform (a -> b)   k =  a -> b
-    LineageTransform [a]        k = [LineageE (LineageTransform a k) k]
-    -- JSTOLAREK: generate this with TH?
-    LineageTransform (a,b)      k = ( LineageTransform a k, LineageTransform b k)
-    LineageTransform (a,b,c)    k = ( LineageTransform a k, LineageTransform b k
-                                    , LineageTransform c k)
-    LineageTransform (a,b,c,d)  k = ( LineageTransform a k, LineageTransform b k
-                                    , LineageTransform c k, LineageTransform d k)
-    LineageTransform (a,b,c,d,e) k = ( LineageTransform a k, LineageTransform b k
-                                     , LineageTransform c k, LineageTransform d k
-                                     , LineageTransform e k)
-    -- JSTOLAREK: more tuple types, up to 16
+    LineageTransform ()         t =  ()
+    LineageTransform Bool       t =  Bool
+    LineageTransform Char       t =  Char
+    LineageTransform Integer    t =  Integer
+    LineageTransform Double     t =  Double
+    LineageTransform Text       t =  Text
+    LineageTransform Decimal    t =  Decimal
+    LineageTransform Scientific t =  Scientific
+    LineageTransform Day        t =  Day
+    LineageTransform (a -> b)   t =  a -> b
+    LineageTransform [a]        t = [LineageE (LineageTransform a t) t]
+    LineageTransform (a,b) t =
+        $(mkLineageTransformTupleRHS [''a, ''b] ''t)
+    LineageTransform (a,b,c) t =
+        $(mkLineageTransformTupleRHS [''a, ''b, ''c] ''t)
+    LineageTransform (a,b,c,d) t =
+        $(mkLineageTransformTupleRHS [''a, ''b, ''c, ''d] ''t)
+    LineageTransform (a,b,c,d,e) t =
+        $(mkLineageTransformTupleRHS [''a, ''b, ''c, ''d, ''e] ''t)
+    LineageTransform (a,b,c,d,e,f) t =
+        $(mkLineageTransformTupleRHS [ ''a, ''b, ''c, ''d, ''e, ''f] ''t)
+    LineageTransform (a,b,c,d,e,f,g) t =
+        $(mkLineageTransformTupleRHS [ ''a, ''b, ''c, ''d, ''e, ''f, ''g] ''t)
+    LineageTransform (a,b,c,d,e,f,g,h) t =
+        $(mkLineageTransformTupleRHS [ ''a, ''b, ''c, ''d, ''e, ''f, ''g, ''h]
+                                     ''t)
+    LineageTransform (a,b,c,d,e,f,g,h,i) t =
+        $(mkLineageTransformTupleRHS [ ''a, ''b, ''c, ''d, ''e, ''f, ''g, ''h
+                                     , ''i] ''t)
+    LineageTransform (a,b,c,d,e,f,g,h,i,j) t =
+        $(mkLineageTransformTupleRHS [ ''a, ''b, ''c, ''d, ''e, ''f, ''g, ''h
+                                     , ''i, ''j] ''t)
+    LineageTransform (a,b,c,d,e,f,g,h,i,j,k) t =
+        $(mkLineageTransformTupleRHS [ ''a, ''b, ''c, ''d, ''e, ''f, ''g, ''h
+                                     , ''i, ''j, ''k] ''t)
+    LineageTransform (a,b,c,d,e,f,g,h,i,j,k,l) t =
+        $(mkLineageTransformTupleRHS [ ''a, ''b, ''c, ''d, ''e, ''f, ''g, ''h
+                                     , ''i, ''j, ''k, ''l] ''t)
+    LineageTransform (a,b,c,d,e,f,g,h,i,j,k,l,m) t =
+        $(mkLineageTransformTupleRHS [ ''a, ''b, ''c, ''d, ''e, ''f, ''g, ''h
+                                     , ''i, ''j, ''k, ''l, ''m] ''t)
+    LineageTransform (a,b,c,d,e,f,g,h,i,j,k,l,m,n) t =
+        $(mkLineageTransformTupleRHS [ ''a, ''b, ''c, ''d, ''e, ''f, ''g, ''h
+                                     , ''i, ''j, ''k, ''l, ''m, ''n] ''t)
+    LineageTransform (a,b,c,d,e,f,g,h,i,j,k,l,m,n,o) t =
+        $(mkLineageTransformTupleRHS [ ''a, ''b, ''c, ''d, ''e, ''f, ''g, ''h
+                                     , ''i, ''j, ''k, ''l, ''m, ''n, ''o] ''t)
+    LineageTransform (a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p) t =
+        $(mkLineageTransformTupleRHS [ ''a, ''b, ''c, ''d, ''e, ''f, ''g, ''h
+                                     , ''i, ''j, ''k, ''l, ''m, ''n, ''o, ''p]
+          ''t)
 
 class (QA a) => QLTable a where
     type family LT a k
