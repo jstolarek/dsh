@@ -4,7 +4,6 @@
 {-# LANGUAGE ScopedTypeVariables    #-}
 {-# LANGUAGE TemplateHaskell        #-}
 {-# LANGUAGE TypeFamilies           #-}
-{-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE TypeOperators          #-}
 {-# LANGUAGE UndecidableInstances   #-}
 {-# LANGUAGE ViewPatterns           #-}
@@ -17,175 +16,23 @@ module Database.DSH.Provenance.Lineage
     , lineageDataQ, lineageProvQ, emptyLineageQ
     ) where
 
-import           Data.Decimal
 import           Data.Proxy
 import           Data.Text
-import           Data.Time.Calendar               (Day)
 import qualified Data.Traversable as T
 import           Data.Typeable
-import           Data.Scientific
 import qualified Data.Sequence as S
-import qualified Data.Set      as Set
+import           Data.Type.Equality
 
 import           Database.DSH.Common.CompileM
 import           Database.DSH.Common.Impossible
 import           Database.DSH.Frontend.Externals ()
 import           Database.DSH.Frontend.Internals
-import           Database.DSH.Frontend.TH
 import           Database.DSH.Frontend.TupleTypes
-
-import           Data.Type.Equality
-
---------------------------------------------------------------------------------
---                           LINEAGE DATA TYPES                               --
---------------------------------------------------------------------------------
-
-data LineageAnnotEntry key = LineageAnnotEntry Text key deriving (Eq, Ord)
-
-instance Show key => Show (LineageAnnotEntry key) where
-    show (LineageAnnotEntry t k) = "( " ++ show t ++ ", " ++ show k ++ " )"
-
-deriveQA   ''LineageAnnotEntry
-deriveView ''LineageAnnotEntry
-
-newtype LineageAnnot key = LineageAnnot (Set.Set (LineageAnnotEntry key))
-
-instance Show key => Show (LineageAnnot key) where
-    show (LineageAnnot laes) = show (Set.toList laes)
-
--- Instance written by hand because we need extra Ord constraint
-instance (QA key, Ord key) => QA (LineageAnnot key) where
-    type Rep (LineageAnnot key) = Rep [LineageAnnotEntry key]
-    toExp (LineageAnnot es) = toExp (Set.toList es)
-    frExp as = LineageAnnot (Set.fromList (frExp as))
-
-data Lineage a k where
-    Lineage :: a -> LineageAnnot k -> Lineage a k
-
-instance TA (Lineage a k)
-
-instance (Show a, Show k) => Show (Lineage a k) where
-    show (Lineage d l) = "( data = "    ++ show d ++
-                         ", lineage = " ++ show l ++ " )"
-
--- Instance written by hand because we need extra Ord constraint
-instance (QA a, QA k, Ord k) => QA (Lineage a k) where
-    type Rep (Lineage a k) = (Rep a, Rep (LineageAnnot k))
-    toExp (Lineage a k)    = TupleConstE ((Tuple2E (toExp a)) (toExp k))
-    frExp (TupleConstE (Tuple2E a k)) = Lineage (frExp a) (frExp k)
-    frExp _ = $impossible
-
-deriveView ''Lineage
+import           Database.DSH.Provenance.Common
 
 --------------------------------------------------------------------------------
 --                        LINEAGE TRANSFORMATION                              --
 --------------------------------------------------------------------------------
-
--- | Type of row annotated with lineage
-type LineageE a k = (a, LineageAnnotE k)
-
-type LineageAnnotE k = [(Text, k)]
-
-type family LineageTransform a k = r | r -> a where
-    LineageTransform ()         t =  ()
-    LineageTransform Bool       t =  Bool
-    LineageTransform Char       t =  Char
-    LineageTransform Integer    t =  Integer
-    LineageTransform Double     t =  Double
-    LineageTransform Text       t =  Text
-    LineageTransform Decimal    t =  Decimal
-    LineageTransform Scientific t =  Scientific
-    LineageTransform Day        t =  Day
-    LineageTransform [a]        t = [LineageE (LineageTransform a t) t]
-    LineageTransform (a,b) t =
-        $(mkLineageTransformTupleRHS [''a, ''b] ''t)
-    LineageTransform (a,b,c) t =
-        $(mkLineageTransformTupleRHS [''a, ''b, ''c] ''t)
-    LineageTransform (a,b,c,d) t =
-        $(mkLineageTransformTupleRHS [''a, ''b, ''c, ''d] ''t)
-    LineageTransform (a,b,c,d,e) t =
-        $(mkLineageTransformTupleRHS [''a, ''b, ''c, ''d, ''e] ''t)
-    LineageTransform (a,b,c,d,e,f) t =
-        $(mkLineageTransformTupleRHS [ ''a, ''b, ''c, ''d, ''e, ''f] ''t)
-    LineageTransform (a,b,c,d,e,f,g) t =
-        $(mkLineageTransformTupleRHS [ ''a, ''b, ''c, ''d, ''e, ''f, ''g] ''t)
-    LineageTransform (a,b,c,d,e,f,g,h) t =
-        $(mkLineageTransformTupleRHS [ ''a, ''b, ''c, ''d, ''e, ''f, ''g, ''h]
-                                     ''t)
-    LineageTransform (a,b,c,d,e,f,g,h,i) t =
-        $(mkLineageTransformTupleRHS [ ''a, ''b, ''c, ''d, ''e, ''f, ''g, ''h
-                                     , ''i] ''t)
-    LineageTransform (a,b,c,d,e,f,g,h,i,j) t =
-        $(mkLineageTransformTupleRHS [ ''a, ''b, ''c, ''d, ''e, ''f, ''g, ''h
-                                     , ''i, ''j] ''t)
-    LineageTransform (a,b,c,d,e,f,g,h,i,j,k) t =
-        $(mkLineageTransformTupleRHS [ ''a, ''b, ''c, ''d, ''e, ''f, ''g, ''h
-                                     , ''i, ''j, ''k] ''t)
-    LineageTransform (a,b,c,d,e,f,g,h,i,j,k,l) t =
-        $(mkLineageTransformTupleRHS [ ''a, ''b, ''c, ''d, ''e, ''f, ''g, ''h
-                                     , ''i, ''j, ''k, ''l] ''t)
-    LineageTransform (a,b,c,d,e,f,g,h,i,j,k,l,m) t =
-        $(mkLineageTransformTupleRHS [ ''a, ''b, ''c, ''d, ''e, ''f, ''g, ''h
-                                     , ''i, ''j, ''k, ''l, ''m] ''t)
-    LineageTransform (a,b,c,d,e,f,g,h,i,j,k,l,m,n) t =
-        $(mkLineageTransformTupleRHS [ ''a, ''b, ''c, ''d, ''e, ''f, ''g, ''h
-                                     , ''i, ''j, ''k, ''l, ''m, ''n] ''t)
-    LineageTransform (a,b,c,d,e,f,g,h,i,j,k,l,m,n,o) t =
-        $(mkLineageTransformTupleRHS [ ''a, ''b, ''c, ''d, ''e, ''f, ''g, ''h
-                                     , ''i, ''j, ''k, ''l, ''m, ''n, ''o] ''t)
-    LineageTransform (a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p) t =
-        $(mkLineageTransformTupleRHS [ ''a, ''b, ''c, ''d, ''e, ''f, ''g, ''h
-                                     , ''i, ''j, ''k, ''l, ''m, ''n, ''o, ''p]
-          ''t)
-
-class (QA a) => QLT a where
-    type family LT a k
-    ltEq :: forall k. (QA k) => Proxy a -> Proxy k
-         -> LineageTransform (Rep a) (Rep k) :~: Rep (LT a k)
-
-instance QLT () where
-    type LT () k = ()
-    ltEq _ _ = Refl
-
-instance QLT Bool where
-    type LT Bool k = Bool
-    ltEq _ _ = Refl
-
-instance QLT Char where
-    type LT Char k = Char
-    ltEq _ _ = Refl
-
-instance QLT Integer where
-    type LT Integer k = Integer
-    ltEq _ _ = Refl
-
-instance QLT Double where
-    type LT Double k = Double
-    ltEq _ _ = Refl
-
-instance QLT Text where
-    type LT Text k = Text
-    ltEq _ _ = Refl
-
-instance QLT Decimal where
-    type LT Decimal k = Decimal
-    ltEq _ _ = Refl
-
-instance QLT Scientific where
-    type LT Scientific k = Scientific
-    ltEq _ _ = Refl
-
-instance QLT Day where
-    type LT Day k = Day
-    ltEq _ _ = Refl
-
-instance QLT a => QLT [a] where
-    type LT [a] k = [Lineage (LT a k) k]
-    ltEq _ k = case ltEq (Proxy :: Proxy a) k of
-                 Refl -> Refl
-
--- QLT instances for tuples
-$(mkQLTTupleInstances 16)
 
 -- | Perform lineage transformation on a query
 lineage :: forall a k.

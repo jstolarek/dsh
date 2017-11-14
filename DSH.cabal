@@ -138,8 +138,8 @@ Library
                      Database.DSH.Common.Kure
                      Database.DSH.Common.TH
 
+                     Database.DSH.Provenance.Common
                      Database.DSH.Provenance.Where
-                     Database.DSH.Provenance.Where.Common
                      Database.DSH.Provenance.Lineage
 
                      Database.DSH.CL.Lang

@@ -29,9 +29,6 @@ import           Database.DSH.Frontend.TupleTypes
 import           Database.DSH.Common.Impossible
 import           Database.DSH.Common.TH
 
-import           Database.DSH.Provenance.Where.Common
-
-
 -----------------------------------------
 -- Deriving all DSH-relevant instances --
 -----------------------------------------
@@ -425,7 +422,9 @@ deriveSmartConstructor typConName tyVarBndrs n i con = do
       -- if a given field has provenance annotation we must apply ProvData type
       -- family to that argument's type
       conArgProvTypes =
-          zipProv (\prov ty -> if prov then AppT (ConT ''ProvData) ty else ty)
+          zipProv (\prov ty -> if prov
+                               then AppT (ConT (mkName "ProvData")) ty
+                               else ty)
                   conArgTypes
 
       -- final types of smart constructors
@@ -574,8 +573,8 @@ generateProvenanceTableSelectors typeName allFieldNames (fieldName, _, ty) = do
 
   let mkSelType t = AppT (AppT ArrowT (AppT (ConT ''DSH.Q) (ConT typeName)))
                          (AppT (ConT ''DSH.Q) t)
-      selTypes = [ mkSelType (AppT (ConT ''ProvData ) ty)
-                 , mkSelType (AppT (ConT ''ProvAnnot) ty) ]
+      selTypes = [ mkSelType (AppT (ConT (mkName "ProvData" )) ty)
+                 , mkSelType (AppT (ConT (mkName "ProvAnnot")) ty) ]
       sigDecs  = zipWith SigD selNames selTypes
 
   fieldVarName <- newName "x"
@@ -676,7 +675,7 @@ hasWhereProvenanceAnnotation ty =
     case tyConName ty of
       Nothing   -> return False
       Just name ->
-          if name == ''WhereProv
+          if name == mkName "WhereProv"
           then return True
           else do
             ty' <- lookThrough name

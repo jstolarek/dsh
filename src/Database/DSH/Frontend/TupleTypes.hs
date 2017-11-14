@@ -658,7 +658,7 @@ mkLineageTransformTupleRHS names k = do
 --    type LT (a1, ..., an) k = (LT a1 k, ..., LT an k)
 --    ltEq _ k =
 --         case (ltEq (Proxy :: Proxy a1) k, ..., ltEq (Proxy :: Proxy an) k) of
---           (Refl, Refl) -> Refl
+--           (Refl, ..., Refl) -> Refl
 mkQLTTupleInstances :: Int -> Q [Dec]
 mkQLTTupleInstances maxWidth =
   mapM mkQLTTupleInstance [2..maxWidth]
