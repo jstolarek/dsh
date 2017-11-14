@@ -249,3 +249,57 @@ instance QLT a => QLT [a] where
 
 -- QLT instances for tuples
 $(mkQLTTupleInstances 16)
+
+-- | QLT instance for WhereProv allows composing where-provenance and lineage
+instance (QA a, BasicType a, QA k, Default k) => QLT (WhereProv a k) where
+    type LT (WhereProv a k) k1 = Lineage (WhereProv a k) k1
+    ltEq _ k = case ltEq (Proxy :: Proxy (WhereProv a k)) k of
+                 Refl -> Refl
+
+--     ltEq :: forall k. (QA k) => Proxy a -> Proxy k
+--         -> LineageTransform (Rep a) (Rep k) :~: Rep (LT a k)
+--  type Rep (WhereProv a key) = (Rep a, (Rep Bool, Rep (WhereProvAnnot key)))
+
+{-
+ ltEq (Proxy (WhereProv a k)) (Proxy k)
+
+    • Couldn't match type ‘(Bool, (Text, Text, LineageTransform (Rep k) (Rep k1)))’
+                     with ‘[(Text, Rep k1)]’
+
+
+
+
+LineageTransform (Rep (WhereProv a k)) (Rep k) :~: Rep (LT (WhereProv a k) k)
+
+
+
+
+
+      Expected type:  LineageTransform (Rep (WhereProv a k)) (Rep k1) :~: Rep (LT (WhereProv a k) k1)
+        Actual type: (LineageTransform (Rep a) (Rep k1), (Bool, (Text, Text, LineageTransform (Rep k) (Rep k1))))
+                 :~: (LineageTransform (Rep a) (Rep k1), (Bool, (Text, Text, LineageTransform (Rep k) (Rep k1))))
+
+LHS
+
+LineageTransform (Rep (WhereProv a k)) (Rep k1)
+
+LineageTransform (Rep a, (Rep Bool, Rep (WhereProvAnnot k))) (Rep k1)
+
+(LineageTransform (Rep a) (Rep k1), LineageTransform (Rep Bool, Rep (WhereProvAnnot k)) (Rep k1))
+
+(LineageTransform (Rep a) (Rep k1), (LineageTransform (Rep Bool) (Rep k1), LineageTransform  (Rep (WhereProvAnnot k)) (Rep k1)))
+
+(LineageTransform (Rep a) (Rep k1), (Bool, LineageTransform (Rep (WhereProvAnnot k)) (Rep k1)))
+
+(LineageTransform (Rep a) (Rep k1), (Bool, LineageTransform (Text, Text, Rep k) (Rep k1)))
+
+(LineageTransform (Rep a) (Rep k1), (Bool, (Text, Text, LineageTransform (Rep k) (Rep k1))))
+
+
+RHS
+
+Rep (Lineage (WhereProv a k) k1)
+
+((Rep a, (Rep Bool, Rep (WhereProvAnnot k))), Rep [LineageAnnotEntry k1])
+
+-}
