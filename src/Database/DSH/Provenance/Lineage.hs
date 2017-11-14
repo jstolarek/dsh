@@ -394,6 +394,7 @@ lineageTransform reifyA reifyK (AppE Cons (TupleConstE (Tuple2E x xs))) = do
   xs' <- lineageTransform reifyA reifyK xs
   return (AppE Cons (TupleConstE (Tuple2E (emptyLineageE reifyK x') xs')))
 
+-- tuples
 lineageTransform reifyA reifyK (TupleConstE tupleE) = do
    let lineageTransformTupleConst =
            $(mkLineageTransformTupleConst 'reifyA 'reifyK 16)
@@ -403,6 +404,17 @@ lineageTransform reifyA reifyK (AppE (TupElem t) arg) = do
     let lineageTransformTupElem =
             $(mkLineageTransformTupElem 'reifyA 'reifyK 'arg 16)
     lineageTransformTupElem t
+
+lineageTransform reifyA reifyK (AppE Fst a) = do
+  let reifyTuple Proxy = TupleT (Tuple2T (reifyA Proxy) $impossible)
+  a' <- lineageTransform reifyTuple reifyK a
+  return (AppE Fst a')
+
+lineageTransform reifyB reifyK (AppE Snd a) = do
+  let reifyTuple Proxy = TupleT (Tuple2T $impossible (reifyB Proxy))
+  a' <- lineageTransform reifyTuple reifyK a
+  return (AppE Snd a')
+
 
 -- NOT YET IMPLEMENTED
 
@@ -436,8 +448,6 @@ lineageTransform _ _ (AppE Zip              _) = $unimplemented
 lineageTransform _ _ (AppE GroupWithKey     _) = $unimplemented
 lineageTransform _ _ (AppE SortWith         _) = $unimplemented
 lineageTransform _ _ (AppE Cond             _) = $unimplemented
-lineageTransform _ _ (AppE Fst              _) = $unimplemented
-lineageTransform _ _ (AppE Snd              _) = $unimplemented
 lineageTransform _ _ (AppE Only             _) = $unimplemented
 lineageTransform _ _ (AppE Length           _) = $unimplemented
 lineageTransform _ _ (AppE Null             _) = $unimplemented
