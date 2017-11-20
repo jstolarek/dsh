@@ -149,6 +149,7 @@ type LineageE a k = (a, LineageAnnotE k)
 type LineageAnnotE k = [(Text, k)]
 
 type family LineageTransform a k = r | r -> a where
+    LineageTransform (a, (Bool, (Text, Text, k))) k = (a, (Bool, (Text, Text, k)))
     LineageTransform ()         t =  ()
     LineageTransform Bool       t =  Bool
     LineageTransform Char       t =  Char
@@ -251,55 +252,93 @@ instance QLT a => QLT [a] where
 $(mkQLTTupleInstances 16)
 
 -- | QLT instance for WhereProv allows composing where-provenance and lineage
-instance (QA a, BasicType a, QA k, Default k) => QLT (WhereProv a k) where
-    type LT (WhereProv a k) k1 = Lineage (WhereProv a k) k1
-    ltEq _ k = case ltEq (Proxy :: Proxy (WhereProv a k)) k of
+instance (QA a, BasicType a, QA k, Default k, QLT a) => QLT (WhereProv a k) where
+    type LT (WhereProv a k) k = WhereProv a k
+    ltEq _ k = case ltEq (Proxy :: Proxy a) k of
                  Refl -> Refl
 
 --     ltEq :: forall k. (QA k) => Proxy a -> Proxy k
 --         -> LineageTransform (Rep a) (Rep k) :~: Rep (LT a k)
+--
 --  type Rep (WhereProv a key) = (Rep a, (Rep Bool, Rep (WhereProvAnnot key)))
+--  type Rep (Lineage a k)     = (Rep a, Rep (LineageAnnot k))
 
 {-
- ltEq (Proxy (WhereProv a k)) (Proxy k)
+RHS
 
-    • Couldn't match type ‘(Bool, (Text, Text, LineageTransform (Rep k) (Rep k1)))’
-                     with ‘[(Text, Rep k1)]’
+Rep (LT (WhereProv a k) k)
 
+Rep (WhereProv a k)
 
-
-
-LineageTransform (Rep (WhereProv a k)) (Rep k) :~: Rep (LT (WhereProv a k) k)
-
+(Rep a, (Bool, (Text, Text, Rep k)))
+-}
 
 
 
 
-      Expected type:  LineageTransform (Rep (WhereProv a k)) (Rep k1) :~: Rep (LT (WhereProv a k) k1)
-        Actual type: (LineageTransform (Rep a) (Rep k1), (Bool, (Text, Text, LineageTransform (Rep k) (Rep k1))))
-                 :~: (LineageTransform (Rep a) (Rep k1), (Bool, (Text, Text, LineageTransform (Rep k) (Rep k1))))
+
+
+
+
+
+
+
+
+
+{-
 
 LHS
 
-LineageTransform (Rep (WhereProv a k)) (Rep k1)
+LineageTransform (Rep (WhereProv a k)) (Rep k)
 
-LineageTransform (Rep a, (Rep Bool, Rep (WhereProvAnnot k))) (Rep k1)
+LineageTransform (Rep a, (Rep Bool, Rep (WhereProvAnnot k))) (Rep k)
 
-(LineageTransform (Rep a) (Rep k1), LineageTransform (Rep Bool, Rep (WhereProvAnnot k)) (Rep k1))
+(LineageTransform (Rep a) (Rep k), LineageTransform (Rep Bool, Rep (WhereProvAnnot k)) (Rep k))
 
-(LineageTransform (Rep a) (Rep k1), (LineageTransform (Rep Bool) (Rep k1), LineageTransform  (Rep (WhereProvAnnot k)) (Rep k1)))
+(LineageTransform (Rep a) (Rep k), (LineageTransform (Rep Bool) k, LineageTransform (Rep (WhereProvAnnot k)) (Rep k)))
 
-(LineageTransform (Rep a) (Rep k1), (Bool, LineageTransform (Rep (WhereProvAnnot k)) (Rep k1)))
+(LineageTransform (Rep a) (Rep k), (LineageTransform Bool k, LineageTransform (Rep (WhereProvAnnot k)) (Rep k)))
 
-(LineageTransform (Rep a) (Rep k1), (Bool, LineageTransform (Text, Text, Rep k) (Rep k1)))
+(LineageTransform (Rep a) (Rep k), (Bool, LineageTransform (Rep (WhereProvAnnot k)) (Rep k)))
 
-(LineageTransform (Rep a) (Rep k1), (Bool, (Text, Text, LineageTransform (Rep k) (Rep k1))))
+(LineageTransform (Rep a) (Rep k), (Bool, LineageTransform (Rep Text, Rep Text, Rep k) (Rep k)))
+
+(LineageTransform (Rep a) (Rep k), (Bool, (Text, Text, LineageTransform (Rep k) (Rep k))))
 
 
-RHS
+RHS:
 
-Rep (Lineage (WhereProv a k) k1)
+Rep (LT (WhereProv a k) k)
 
-((Rep a, (Rep Bool, Rep (WhereProvAnnot k))), Rep [LineageAnnotEntry k1])
+Rep (Lineage (WhereProv a k) k)
+
+(Rep (WhereProv a k), Rep (LineageAnnot k))
+
+((Rep a, (Rep Bool, Rep (WhereProvAnnot key))), Rep [LineageAnnotEntry k])
+
+((Rep a, (Rep Bool, (Rep Text, Rep Text, Rep k))), [(Rep Text, Rep k)])
+
+((Rep a, (Bool, (Text, Text, Rep k))), [(Text, Rep k)])
+
+RHS is correct
+
+LHS vs RHS
+
+(LineageTransform (Rep a) (Rep k), (Bool, (Text, Text, LineageTransform (Rep k) (Rep k))))
+
+((Rep a,                           (Bool, (Text, Text, Rep k))), [(Text, Rep k)])
+
+
+Alternative reduction of LHS:
+
+LineageTransform (Rep a, (Rep Bool, Rep (WhereProvAnnot k))) (Rep k)
+
+LineageTransform (Rep a, (Rep Bool, (Rep Text, Rep Text, Rep k))) (Rep k)
+
+LineageTransform (Rep a, (Bool, (Text, Text, Rep k))) (Rep k)
+
+LineageTransform (a, (Bool, (Text, Text, k))) k = LineageE (a, (Bool, (Text, Text, k))) k
+
+--  LineageTransform [a] k = [(LineageTransform a k, LineageAnnot k)]
 
 -}
