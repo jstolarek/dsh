@@ -97,7 +97,6 @@ type family LineageTransform a k = r | r -> a where
     LineageTransform Decimal    t =  Decimal
     LineageTransform Scientific t =  Scientific
     LineageTransform Day        t =  Day
-    LineageTransform (a -> b)   t =  a -> b
     LineageTransform [a]        t = [LineageE (LineageTransform a t) t]
     LineageTransform (a,b) t =
         $(mkLineageTransformTupleRHS [''a, ''b] ''t)
@@ -210,7 +209,7 @@ typeLT (TextT)          _ = TextT
 typeLT (DecimalT)       _ = DecimalT
 typeLT (ScientificT)    _ = ScientificT
 typeLT (DayT)           _ = DayT
-typeLT (ArrowT fun arg) _ = (ArrowT fun arg)
+typeLT (ArrowT _ _)     _ = $impossible
 typeLT (ListT lt) kt =
     ListT (TupleT $ Tuple2T (typeLT lt kt)
                       (ListT (TupleT $ Tuple2T TextT kt)))
