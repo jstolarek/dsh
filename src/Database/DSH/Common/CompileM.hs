@@ -23,14 +23,14 @@ runCompile ma = evalState ma 0 -- see Note [Unique names hack]
 
 -- | Run lineage transformation
 runLineage :: Compile a -> a
-runLineage ma = evalState ma 1000 -- see Note [Unique names hack]
+runLineage ma = evalState ma 10000 -- see Note [Unique names hack]
 
 -- Note [Unique names hack]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~
 --
 -- It is essential that variable names created during lineage transform and
--- compilation from FL to CL are distinct.  To achieve this we usa a ugly hack:
+-- compilation from FL to CL are distinct.  To achieve this we use an ugly hack:
 -- variables generated during compilation are numbered from 0, and those
--- generated during lineage transformation are numbered from 1000.  If
+-- generated during lineage transformation are numbered from 10000.  If
 -- compilation of lineage-transformed query ever generates more than 1000
 -- variables things will break.
