@@ -358,6 +358,44 @@ lineageTransform reifyA reifyK (AppE Reverse xs) = do
   xs' <- lineageTransform reifyA reifyK  xs
   return (AppE Reverse xs')
 
+-- zip
+lineageTransform reifyA reifyK (AppE Zip (TupleConstE (Tuple2E xs ys))) = do
+  let reifyFst Proxy = case reifyA Proxy of
+                         ListT (TupleT (Tuple2T t _)) -> ListT t
+                         _ -> $impossible
+
+      reifySnd Proxy = case reifyA Proxy of
+                         ListT (TupleT (Tuple2T _ t)) -> ListT t
+                         _ -> $impossible
+
+      annotTy = ListT (TupleT $ Tuple2T TextT (reifyK Proxy))
+
+      lineageRecTy :: Type c -> Type (LineageTransform c k)
+      lineageRecTy t = typeLT t (reifyK Proxy)
+
+  xs' <- lineageTransform reifyFst reifyK xs
+  ys' <- lineageTransform reifySnd reifyK ys
+
+  let -- zip (L(xs)) (L(ys))
+      zipL = AppE Zip (TupleConstE (Tuple2E xs' ys'))
+
+      reifyX Proxy = case reifyA Proxy of
+          ListT (TupleT (Tuple2T t1 t2)) ->
+              TupleT (Tuple2T (TupleT (Tuple2T (lineageRecTy t1) annotTy))
+                              (TupleT (Tuple2T (lineageRecTy t2) annotTy)))
+          _ -> $impossible
+
+      -- (\x -> { data = ((fst x).data, (snd x).data)
+      --        , prov = ((fst x).prov, (snd x).prov) })
+      lam x = lineageE
+              (TupleConstE (Tuple2E
+                            (lineageDataE (AppE Fst (VarE reifyX x)))
+                            (lineageDataE (AppE Snd (VarE reifyX x)))))
+              (lineageProvE (AppE Fst (VarE reifyX x)) `lineageAppendE`
+                            (lineageProvE (AppE Fst (VarE reifyX x))))
+
+  return (AppE Map (TupleConstE (Tuple2E (LamE reifyX lam) zipL)))
+
 -- variables
 lineageTransform _ reifyK (VarE reifyVar v) = do
   let reifyVar' Proxy = typeLT (reifyVar Proxy) (reifyK Proxy)
@@ -443,7 +481,6 @@ lineageTransform _ _ (AppE Avg              _) = $unimplemented
 lineageTransform _ _ (AppE Maximum          _) = $unimplemented
 lineageTransform _ _ (AppE Minimum          _) = $unimplemented
 lineageTransform _ _ (AppE Nub              _) = $unimplemented
-lineageTransform _ _ (AppE Zip              _) = $unimplemented
 lineageTransform _ _ (AppE GroupWithKey     _) = $unimplemented
 lineageTransform _ _ (AppE SortWith         _) = $unimplemented
 lineageTransform _ _ (AppE Cond             _) = $unimplemented
@@ -494,6 +531,7 @@ lineageTransform _ _ (AppE Cons      _) = $impossible
 lineageTransform _ _ (AppE ConcatMap _) = $impossible
 lineageTransform _ _ (AppE Map       _) = $impossible
 lineageTransform _ _ (AppE Append    _) = $impossible
+lineageTransform _ _ (AppE Zip       _) = $impossible
 -- let bindings are introduced by lineageTransform so it is not possible to
 -- encounter one
 lineageTransform _ _ (LetE _ _ _) = $impossible
