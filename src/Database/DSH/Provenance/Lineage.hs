@@ -241,7 +241,7 @@ lineageTransform reifyA reifyK tbl@(TableE (TableDB name _ _) keyProj) = do
                            _       -> $impossible
       return (AppE Map (TupleConstE (Tuple2E
                         (LamE reifyC (lam (reifyLT mkReify reifyK))) tbl)))
-    Nothing -> $impossible
+    Nothing -> error "Type of table key does not match type of lineage key"
 
 lineageTransform reifyA reifyK (AppE Map
                    (TupleConstE (Tuple2E (LamE reifyC lam) tbl))) = do
