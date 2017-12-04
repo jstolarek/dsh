@@ -93,7 +93,7 @@ instance QA Day where
 
 instance (QA a) => QA [a] where
     type Rep [a] = [Rep a]
-    toExp as = ListE mkReify (P.fmap toExp $ fromList as)
+    toExp as = ListE reifyTy (P.fmap toExp $ fromList as)
     frExp (ListE _ as) = toList $ P.fmap frExp as
     frExp _ = $impossible
 
@@ -107,10 +107,10 @@ instance (QA a, Default a) => QA (Maybe a) where
 
 instance (QA a,QA b) => QA (Either a b) where
     type Rep (Either a b) = ([Rep a],[Rep b])
-    toExp (Left a)  = pairE (ListE mkReify (S.singleton $ toExp a))
-                            (ListE mkReify S.empty)
-    toExp (Right b) = pairE (ListE mkReify S.empty)
-                            (ListE mkReify $ S.singleton $ toExp b)
+    toExp (Left a)  = pairE (ListE reifyTy (S.singleton $ toExp a))
+                            (ListE reifyTy S.empty)
+    toExp (Right b) = pairE (ListE reifyTy S.empty)
+                            (ListE reifyTy $ S.singleton $ toExp b)
     frExp (TupleConstE (Tuple2E (ListE _ s1) (ListE _ s2))) =
         case (S.viewl s1, S.viewl s2) of
             (a S.:< _, _) -> Left (frExp a)
@@ -546,7 +546,7 @@ partitionEithers es = pair (lefts es) (rights es)
 -- * List Construction
 
 nil :: (QA a) => Q [a]
-nil = Q (ListE mkReify S.empty)
+nil = Q (ListE reifyTy S.empty)
 
 cons :: (QA a) => Q a -> Q [a] -> Q [a]
 cons (Q a) (Q as) = Q (AppE Cons (pairE a as))
@@ -597,7 +597,7 @@ drop :: (QA a) => Q Integer -> Q [a] -> Q [a]
 drop i xs = map fst $ filter (\xp -> snd xp > i) $ number xs
 
 map :: (QA a,QA b) => (Q a -> Q b) ->  Q [a] -> Q [b]
-map f (Q as) = Q (AppE Map (pairE (LamE mkReify (toLam f)) as))
+map f (Q as) = Q (AppE Map (pairE (LamE reifyTy (toLam f)) as))
 
 append :: (QA a) => Q [a] -> Q [a] -> Q [a]
 append (Q as) (Q bs) = Q (AppE Append (pairE as bs))
@@ -606,12 +606,12 @@ append (Q as) (Q bs) = Q (AppE Append (pairE as bs))
 (++) = append
 
 filter :: (QA a) => (Q a -> Q Bool) -> Q [a] -> Q [a]
-filter f (Q as) = Q (AppE Filter (pairE (LamE mkReify (toLam f)) as))
+filter f (Q as) = Q (AppE Filter (pairE (LamE reifyTy (toLam f)) as))
 
 -- | Partition a list into groups according to the supplied projection
 -- function.
 groupWithKey :: (QA a,QA b,Ord b, TA b) => (Q a -> Q b) -> Q [a] -> Q [(b,[a])]
-groupWithKey f (Q as) = Q (AppE GroupWithKey (pairE (LamE mkReify (toLam f)) as))
+groupWithKey f (Q as) = Q (AppE GroupWithKey (pairE (LamE reifyTy (toLam f)) as))
 
 groupWith :: (QA a,QA b,Ord b, TA b) => (Q a -> Q b) -> Q [a] -> Q [[a]]
 groupWith f as = map snd (groupWithKey f as)
@@ -628,7 +628,7 @@ groupAggr k p agg as =
 
 
 sortWith :: (QA a,QA b,Ord b, TA b) => (Q a -> Q b) -> Q [a] -> Q [a]
-sortWith f (Q as) = Q (AppE SortWith (pairE (LamE mkReify (toLam f)) as))
+sortWith f (Q as) = Q (AppE SortWith (pairE (LamE reifyTy (toLam f)) as))
 
 null :: (QA a) => Q [a] -> Q Bool
 null (Q as) = Q (AppE Null as)
@@ -672,7 +672,7 @@ concat :: (QA a) => Q [[a]] -> Q [a]
 concat (Q ass) = Q (AppE Concat ass)
 
 concatMap :: (QA a,QA b) => (Q a -> Q [b]) -> Q [a] -> Q [b]
-concatMap f (Q as) = Q (AppE ConcatMap (pairE (LamE mkReify (toLam f)) as))
+concatMap f (Q as) = Q (AppE ConcatMap (pairE (LamE reifyTy (toLam f)) as))
 
 maximum :: (QA a,Ord a,TA a) => Q [a] -> Q a
 maximum (Q as) = Q (AppE Maximum as)

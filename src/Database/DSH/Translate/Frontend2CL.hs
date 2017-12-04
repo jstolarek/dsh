@@ -12,7 +12,6 @@ module Database.DSH.Translate.Frontend2CL
 import           Data.List                        (findIndices)
 import           Data.List.NonEmpty               (NonEmpty((:|)))
 import qualified Data.List.NonEmpty               as N
-import           Data.Proxy
 import qualified Data.Text                        as T
 import           Text.Printf
 
@@ -67,16 +66,14 @@ translate (TextE t) = return $ CP.string t
 translate (DecimalE d) = return $ CP.decimal $ fromRational $ toRational d
 translate (ScientificE d) = return $ CP.decimal d
 translate (DayE d) = return $ CP.day $ L.Date d
-translate (VarE reifyTy i) = do
-    let ty = reifyTy Proxy
+translate (VarE ty i) = do
     return $ CP.var (translateType ty) (prefixVar i)
 translate (LetE x e1 e2) = do
     e1' <- translate e1
     e2' <- translate e2
     return $ CP.let_ (prefixVar x) e1' e2'
-translate (ListE reifyTy es) = do
-    let ty = ListT (reifyTy Proxy)
-    CP.list (translateType ty) <$> mapM translate (toList es)
+translate (ListE ty es) = do
+    CP.list (translateType (ListT ty)) <$> mapM translate (toList es)
 -- We expect the query language to be first order. Lambdas must only
 -- occur as an argument to higher-order built-in combinators (map,
 -- concatMap, sortWith, ...). If lambdas occur in other places that

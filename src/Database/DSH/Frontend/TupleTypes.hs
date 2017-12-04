@@ -721,14 +721,14 @@ mkLineageTransformTupleConst reifyA reifyK maxWidth = do
     return $ LamE [VarP lamArgName] lamBody
 
 -- TupleNE a1 ... aN = do
---    let reify1 = case reifyA Proxy of
---                   TupleT (TupleNT t ... _) -> t
+--    let ty1 = case tyA of
+--                TupleT (TupleNT t ... _) -> t
 --        ...
---        reifyN = case reifyA Proxy of
---                   TupleT (TupleNT _ ... t) -> t
---     a1' <- lineageTransform reify1 reifyK a1
+--        tyN = case tyA of
+--                TupleT (TupleNT _ ... t) -> t
+--     a1' <- lineageTransform ty1 tyK a1
 --     --
---     aN' <- lineageTransform reifyN reifyK aN
+--     aN' <- lineageTransform tyN tyK aN
 --     return (TupleConstE (TupleNE a1' ... aN')
 mkLineageTransformTermMatch :: Name -> Name -> Int -> Q Match
 mkLineageTransformTermMatch reifyA reifyK width = do
@@ -737,19 +737,19 @@ mkLineageTransformTermMatch reifyA reifyK width = do
   tupNames' <- mkNames "b" width
 
   let reifyName :: Int -> Name
-      reifyName n = mkName $ "reify" ++ show n
+      reifyName n = mkName $ "ty" ++ show n
 
       mkPats :: Int -> Int -> [Pat] -> [Pat]
       mkPats n m acc | n == m    = mkPats n (m - 1) (VarP reifyPatName : acc)
                      | m == 0    = acc
                      | otherwise = mkPats n (m - 1) (WildP : acc)
 
-      -- reifyN Proxy = match reifyA Proxy with
-      --                  TupleT (TupleN _ ... n ... _) -> n
+      -- reifyN = match reifyA with
+      --            TupleT (TupleN _ ... n ... _) -> n
       reifyBody :: Int -> Dec
       reifyBody n = FunD (reifyName n)
-        [ Clause [ConP 'Data.Proxy.Proxy []]
-          (NormalB $ CaseE (AppE (VarE reifyA) (ConE 'Data.Proxy.Proxy))
+        [ Clause []
+          (NormalB $ CaseE (VarE reifyA)
             [Match (ConP (mkName "TupleT") [ConP (tupTyConstName "" width)
                                            (mkPats n width [])])
                        (NormalB $ VarE reifyPatName) []]) []]
@@ -774,13 +774,13 @@ mkLineageTransformTermMatch reifyA reifyK width = do
                     [])
 
 -- \tupElem -> case tupElem of
---    Tup2_1 -> do let reifyA' Proxy = TupleT (Tuple2T (reifyA Proxy) undefined)
---                 arg' <- lineageTransform reifyA' reifyK arg
+--    Tup2_1 -> do let tyA' = TupleT (Tuple2T tyA undefined)
+--                 arg' <- lineageTransform tyA' tyK arg
 --                 return (AppE (TupElem Tup2_1) arg')
 --
---    TupN_M -> do let reifyA' Proxy = TupleT (TupleNT undefined ...
---                                              (reifyA Proxy) ... undefined)
---                 arg' <- lineageTransform reifyA' reifyK arg
+--    TupN_M -> do let tyA' = TupleT (TupleNT undefined ...
+--                                            tyA ... undefined)
+--                 arg' <- lineageTransform tyA' tyK arg
 --                 return (AppE (TupElem TupN_M) arg')
 mkLineageTransformTupElem :: Name -> Name -> Name -> Int -> Q Exp
 mkLineageTransformTupElem reifyA reifyK arg maxWidth = do
@@ -797,17 +797,16 @@ mkLineageTransformTupElemMatches reifyA reifyK arg n =
 
 mkLineageTransformTupElemMatch :: Name -> Name -> Name -> Int -> Int -> Q Match
 mkLineageTransformTupElemMatch reifyA reifyK arg n m = do
-  reifyA' <- newName "reifyA"
+  reifyA' <- newName "tyA"
   arg'    <- newName "arg"
-  let -- undefined ... (reifyA Proxy) ... undefined
+  let -- undefined ... tyA ... undefined
       -- l positions, call to (reifyA Proxy) on k-th
       mkExps :: Int -> Int -> [Exp] -> [Exp]
-      mkExps k l acc | k == l    = mkExps k (l - 1) (AppE (VarE reifyA)
-                                                          (ConE 'Proxy) : acc)
+      mkExps k l acc | k == l    = mkExps k (l - 1) (VarE reifyA : acc)
                      | l == 0    = acc
                      | otherwise = mkExps k (l - 1) (VarE 'undefined : acc)
 
-      letSt = LetS [FunD reifyA' [Clause [ConP 'Proxy []]
+      letSt = LetS [FunD reifyA' [Clause []
                    (NormalB (AppE (ConE (mkName "TupleT"))
                       (foldl' AppE (ConE (tupTyConstName "" n)) (mkExps m n []))))
                    []]]

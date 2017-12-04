@@ -21,7 +21,6 @@ import qualified Data.Sequence as S
 import           Data.Decimal
 import           Data.Scientific
 import           Data.List.NonEmpty               (NonEmpty)
-import           Data.Proxy
 import           Data.Text                        (Text)
 import           Data.Time.Calendar               (Day)
 import           Data.Typeable
@@ -60,8 +59,6 @@ class View a where
     view :: a -> ToView a
 
 newtype Q a = Q (Exp (Rep a))
-
-type DReify a = Proxy a -> Type a
 
 --------------------------------------------------------------------------------
 -- Typed frontend ASTs
@@ -137,10 +134,10 @@ data Exp a where
     DecimalE    :: !Decimal -> Exp Decimal
     ScientificE :: !Scientific -> Exp Scientific
     DayE        :: !Day     -> Exp Day
-    ListE       :: DReify a -> !(S.Seq (Exp a)) -> Exp [a]
+    ListE       :: Type a -> !(S.Seq (Exp a)) -> Exp [a]
     AppE        :: Fun a b -> Exp a -> Exp b
-    LamE        :: DReify a -> (Integer -> Exp b) -> Exp (a -> b)
-    VarE        :: DReify a -> Integer -> Exp a
+    LamE        :: Type a -> (Integer -> Exp b) -> Exp (a -> b)
+    VarE        :: Type a -> Integer -> Exp a
     TableE      :: (Reify a, Typeable k)
                 => Table -> (Integer -> Exp k) -> Exp [a]
     TupleConstE :: !(TupleConst a) -> Exp a
@@ -257,10 +254,10 @@ unQ :: Q a -> Exp (Rep a)
 unQ (Q e) = e
 
 toLam :: (QA a, QA b) => (Q a -> Q b) -> Integer -> Exp (Rep b)
-toLam f = unQ . f . Q . (VarE mkReify)
+toLam f = unQ . f . Q . (VarE reifyTy)
 
-mkReify :: forall a. Reify a => DReify a
-mkReify Proxy = reify (undefined :: a)
+reifyTy :: forall a. Reify a => Type a
+reifyTy = reify (undefined :: a)
 
 -- * Generate Reify instances for tuple types
 mkReifyInstances 16
