@@ -68,10 +68,6 @@ translate (ScientificE d) = return $ CP.decimal d
 translate (DayE d) = return $ CP.day $ L.Date d
 translate (VarE ty i) = do
     return $ CP.var (translateType ty) (prefixVar i)
-translate (LetE x e1 e2) = do
-    e1' <- translate e1
-    e2' <- translate e2
-    return $ CP.let_ (prefixVar x) e1' e2'
 translate (ListE ty es) = do
     CP.list (translateType (ListT ty)) <$> mapM translate (toList es)
 -- We expect the query language to be first order. Lambdas must only

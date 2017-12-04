@@ -141,7 +141,6 @@ data Exp a where
     TableE      :: (Reify a, Typeable k)
                 => Table -> (Integer -> Exp k) -> Exp [a]
     TupleConstE :: !(TupleConst a) -> Exp a
-    LetE        :: Integer -> Exp a -> Exp b -> Exp b
 
 data Type a where
     UnitT       :: Type ()

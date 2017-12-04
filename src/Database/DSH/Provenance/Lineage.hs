@@ -332,12 +332,11 @@ lineageTransform tyA tyK (AppE ConcatMap
                             (\a -> subst a boundVar (compLineageApp al)))
                       (singletonE ty' (lineageDataE
                                    (VarE ty al)))))
-      -- JSTOLAREK: alternative version using let-bindings.  These currently
-      -- don't work.  See email from Alex on 10/07/2017
-{-
-      compSingOrg al = LetE boundVar (lineageDataE (VarE ty al))
-                                     (compLineageApp al)
--}
+
+      -- if we had let-bindings we could define compSingOrg as:
+      --
+      -- compSingOrg al = LetE boundVar (lineageDataE (VarE ty al))
+      --                                (compLineageApp al)
 
   return (AppE ConcatMap (TupleConstE (Tuple2E
                                        (LamE ty'' compSingOrg) tbl')))
@@ -527,9 +526,6 @@ lineageTransform _ _ (AppE ConcatMap _) = $impossible
 lineageTransform _ _ (AppE Map       _) = $impossible
 lineageTransform _ _ (AppE Append    _) = $impossible
 lineageTransform _ _ (AppE Zip       _) = $impossible
--- let bindings are introduced by lineageTransform so it is not possible to
--- encounter one
-lineageTransform _ _ (LetE _ _ _) = $impossible
 -- Lambdas should only appear inside AppE arguments
 lineageTransform _ _ (LamE _ _  ) = $impossible
 
@@ -628,5 +624,3 @@ subst x v (TupleConstE t) =
     let substTuple :: TupleConst a -> TupleConst a
         substTuple = $(mkSubstTuple 'x 'v 16)
     in TupleConstE (substTuple t)
-subst x v (LetE b e1 e2)  | v == b    = LetE b (subst x v e1) e2
-                          | otherwise = LetE b (subst x v e1) (subst x v e2)
