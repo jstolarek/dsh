@@ -1,15 +1,18 @@
-{-# LANGUAGE GADTs                  #-}
 {-# LANGUAGE FlexibleContexts       #-}
 {-# LANGUAGE FlexibleInstances      #-}
+{-# LANGUAGE GADTs                  #-}
+{-# LANGUAGE MultiParamTypeClasses  #-}
 {-# LANGUAGE ScopedTypeVariables    #-}
 {-# LANGUAGE TemplateHaskell        #-}
 {-# LANGUAGE TypeFamilies           #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
-{-# LANGUAGE MultiParamTypeClasses  #-}
 {-# LANGUAGE TypeOperators          #-}
 {-# LANGUAGE UndecidableInstances   #-}
 {-# LANGUAGE ViewPatterns           #-}
 
+-- | This module implements lineage transformation as described in
+-- "Language-integrated provenance in Haskell" paper by Jan Stolarek and James
+-- Cheney.
 module Database.DSH.Provenance.Lineage
     ( -- * Lineage transformation and data type
       lineage, Lineage, QLT(..)
@@ -37,10 +40,12 @@ import           Database.DSH.Frontend.TupleTypes
 
 import           Data.Type.Equality
 
+
 --------------------------------------------------------------------------------
 --                           LINEAGE DATA TYPES                               --
 --------------------------------------------------------------------------------
 
+-- | A single lineage entry consisting of table name and row key
 data LineageAnnotEntry key = LineageAnnotEntry Text key deriving (Eq, Ord)
 
 instance Show key => Show (LineageAnnotEntry key) where
@@ -49,17 +54,20 @@ instance Show key => Show (LineageAnnotEntry key) where
 deriveQA   ''LineageAnnotEntry
 deriveView ''LineageAnnotEntry
 
+-- | Lineage annotation consisting of a set of lineage annotations
 newtype LineageAnnot key = LineageAnnot (Set.Set (LineageAnnotEntry key))
 
 instance Show key => Show (LineageAnnot key) where
     show (LineageAnnot laes) = show (Set.toList laes)
 
--- Instance written by hand because we need extra Ord constraint
+-- Instance written by hand because we need extra Ord constraint due to usage of
+-- Set
 instance (QA key, Ord key) => QA (LineageAnnot key) where
     type Rep (LineageAnnot key) = Rep [LineageAnnotEntry key]
     toExp (LineageAnnot es) = toExp (Set.toList es)
     frExp as = LineageAnnot (Set.fromList (frExp as))
 
+-- | Data type that attaches a lineage annotation to a value
 data Lineage a k where
     Lineage :: a -> LineageAnnot k -> Lineage a k
 
@@ -69,7 +77,8 @@ instance (Show a, Show k) => Show (Lineage a k) where
     show (Lineage d l) = "( data = "    ++ show d ++
                          ", lineage = " ++ show l ++ " )"
 
--- Instance written by hand because we need extra Ord constraint
+-- Instance written by hand because we need extra Ord constraint due to usage of
+-- Set
 instance (QA a, QA k, Ord k) => QA (Lineage a k) where
     type Rep (Lineage a k) = (Rep a, Rep (LineageAnnot k))
     toExp (Lineage a k)    = TupleConstE ((Tuple2E (toExp a)) (toExp k))
@@ -78,15 +87,17 @@ instance (QA a, QA k, Ord k) => QA (Lineage a k) where
 
 deriveView ''Lineage
 
+
 --------------------------------------------------------------------------------
 --                        LINEAGE TRANSFORMATION                              --
 --------------------------------------------------------------------------------
 
--- | Type of row annotated with lineage
+-- | LineageAnnotE and LineageE are types of internal representations (Rep) of
+-- LineageAnnot and Lineage, as defined by QA instances above.
+type LineageAnnotE k = [(Text, k)]
 type LineageE a k = (a, LineageAnnotE k)
 
-type LineageAnnotE k = [(Text, k)]
-
+-- | Defines lineage type translation on interal types
 type family LineageTransform a k = r | r -> a where
     LineageTransform ()         t =  ()
     LineageTransform Bool       t =  Bool
@@ -139,10 +150,16 @@ type family LineageTransform a k = r | r -> a where
                                      , ''i, ''j, ''k, ''l, ''m, ''n, ''o, ''p]
           ''t)
 
+-- | LT defines lineage type translation on external types, ltEq estabilishes
+-- connection between type translation on external and internal types.  Every
+-- external type needs an instance of QLT.  These are generated with
+-- deriveQLTInstance (called by deriveDSH).
 class (QA a) => QLT a where
     type family LT a k
     ltEq :: forall k. (QA k) => Proxy a -> Proxy k
          -> LineageTransform (Rep a) (Rep k) :~: Rep (LT a k)
+
+-- QLT instances for basic types
 
 instance QLT () where
     type LT () k = ()
@@ -194,33 +211,14 @@ lineage :: forall a k.
            , Reify (LineageTransform (Rep a) (Rep k)) )
         => Proxy k -> Q a -> Q (LT a k)
 lineage pk (Q a) =
-   let pa = Proxy :: Proxy a
-   in Q (castWith (apply Refl (ltEq pa pk))
-                  (runLineage (lineageTransform reifyTy
-                                               (reifyTy :: Type (Rep k)) a)))
-
-typeLT :: forall a k. Type a -> Type k -> Type (LineageTransform a k)
-typeLT UnitT            _ = UnitT
-typeLT BoolT            _ = BoolT
-typeLT CharT            _ = CharT
-typeLT IntegerT         _ = IntegerT
-typeLT DoubleT          _ = DoubleT
-typeLT TextT            _ = TextT
-typeLT DecimalT         _ = DecimalT
-typeLT ScientificT      _ = ScientificT
-typeLT DayT             _ = DayT
-typeLT (ArrowT _ _)     _ = $impossible
-typeLT (ListT lt) kt =
-    ListT (TupleT $ Tuple2T (typeLT lt kt)
-                      (ListT (TupleT $ Tuple2T TextT kt)))
-typeLT (TupleT t) k =
-    let typeLTTuple :: TupleType a -> Type (LineageTransform a k)
-        typeLTTuple = $(mkTypeLT 'k 16)
-    in typeLTTuple t
+   Q (castWith (apply Refl (ltEq (Proxy :: Proxy a) pk))
+            (runLineage (lineageTransform reifyTy (reifyTy :: Type (Rep k)) a)))
 
 lineageTransform :: forall a k. Typeable k
                  => Type a -> Type k -> Exp a
                  -> Compile (Exp (LineageTransform a k))
+
+-- table declarations
 lineageTransform tyA tyK tbl@(TableE (TableDB name _ _) keyProj) = do
   let -- We have to perform runtime type equality to check that type of lineage
       -- key specified in a call to `lineage` matches the type returned by
@@ -230,142 +228,97 @@ lineageTransform tyA tyK tbl@(TableE (TableDB name _ _) keyProj) = do
       keyEquality _ _ = eqT
   case keyEquality tyK keyProj of
     Just Refl -> do
-      let lam :: Type b -> Integer -> Exp (LineageE b k)
+      let -- lambda that attaches singleton lineage annotation to a variable
           lam ty a = lineageE (VarE ty a)
-                     (lineageAnnotE tyK (pack name) (keyProj a :: Exp k))
-          tyC = case tyA of
-                     ListT t -> t
-                     _       -> $impossible
+                              (lineageAnnotE tyK (pack name) (keyProj a))
       return (AppE Map (TupleConstE (Tuple2E
-                        (LamE tyC (lam (typeLT reifyTy tyK))) tbl)))
+                        (LamE (elemTy tyA) (lam (typeLT reifyTy tyK))) tbl)))
     Nothing -> error "Type of table key does not match type of lineage key"
 
+-- map
 lineageTransform tyA tyK (AppE Map
-                   (TupleConstE (Tuple2E (LamE tyC lam) tbl))) = do
+                          (TupleConstE (Tuple2E (LamE tyC lam) tbl))) = do
   -- translate the comprehension generator
-  let tyCs = ListT tyC
-  tbl' <- lineageTransform tyCs tyK tbl
+  tbl' <- lineageTransform (ListT tyC) tyK tbl
 
   -- saturate the lambda and translate the resulting expression
-  let tyB = case tyA of
-                 ListT t -> t
-                 _       -> $impossible
   boundVar <- freshVar
-  bodyExp  <- lineageTransform tyA tyK (singletonE tyB (lam boundVar))
+  bodyExp  <- lineageTransform tyA tyK (singletonE (elemTy tyA) (lam boundVar))
 
-  let lineageRecTy :: Type c -> Type (LineageTransform c k)
-      lineageRecTy t = typeLT t tyK
-
-      annotTy = ListT (TupleT $ Tuple2T TextT tyK)
-
-      ty = case tyA of
-             ListT t -> TupleT (Tuple2T (lineageRecTy t) annotTy)
-             _       -> $impossible
-
-      ty' = case tyA of
-              ListT t -> lineageRecTy t
-              _       -> $impossible
-
-      ty'' = TupleT (Tuple2T (lineageRecTy tyC) annotTy)
+  let ty   = typeLT (elemTy tyA) tyK
+      ty'  = lineageTy ty tyK
+      ty'' = lineageTy (typeLT tyC tyK) tyK
 
       -- lambda that appends lineages
       lamAppend al z =
-             lineageE (lineageDataE (VarE ty z))
-                        ((lineageProvE (VarE ty al)) `lineageAppendE`
-                         (lineageProvE (VarE ty  z)))
+             lineageE (lineageDataE (VarE ty' z))
+                        ((lineageProvE (VarE ty' al)) `lineageAppendE`
+                         (lineageProvE (VarE ty'  z)))
 
       -- comprehension that appends lineages of currently traversed collection
       -- and result of nested part of comprehension
       compLineageApp al = AppE Map (TupleConstE
-             (Tuple2E (LamE ty (lamAppend al)) bodyExp))
+             (Tuple2E (LamE ty' (lamAppend al)) bodyExp))
 
       -- comprehension over singleton list containing data originally assigned
       -- to comprehension binder
       compSingOrg al = AppE ConcatMap (TupleConstE
-             (Tuple2E (LamE ty'
-                            (\a -> subst a boundVar (compLineageApp al)))
-                      (singletonE ty' (lineageDataE
-                                   (VarE ty al)))))
-  return (AppE ConcatMap (TupleConstE (Tuple2E
-                                       (LamE ty'' compSingOrg) tbl')))
+             (Tuple2E (LamE ty (\a -> subst a boundVar (compLineageApp al)))
+                      (singletonE ty (lineageDataE (VarE ty' al)))))
+  return (AppE ConcatMap (TupleConstE (Tuple2E (LamE ty'' compSingOrg) tbl')))
 
+-- concatMap
 lineageTransform tyA tyK (AppE ConcatMap
                    (TupleConstE (Tuple2E (LamE tyC lam) tbl))) = do
   -- translate the comprehension generator
-  let tyCs = ListT tyC
-  tbl' <- lineageTransform tyCs tyK tbl
+  tbl' <- lineageTransform (ListT tyC) tyK tbl
 
   -- saturate the lambda and translate the resulting expression
   boundVar <- freshVar
   bodyExp  <- lineageTransform tyA tyK (lam boundVar)
 
-  let lineageRecTy :: Type c -> Type (LineageTransform c k)
-      lineageRecTy t = typeLT t tyK
-
-      annotTy = ListT (TupleT $ Tuple2T TextT tyK)
-
-      ty = case tyA of
-                  ListT t -> TupleT (Tuple2T (lineageRecTy t) annotTy)
-                  _       -> $impossible
-
-      ty' = case tyA of
-                   ListT t -> lineageRecTy t
-                   _       -> $impossible
-
-      ty'' = TupleT (Tuple2T (lineageRecTy tyC) annotTy)
+  let ty   = typeLT (elemTy tyA) tyK
+      ty'  = lineageTy ty tyK
+      ty'' = lineageTy (typeLT tyC tyK) tyK
 
       -- lambda that appends lineages
       lamAppend al z =
-             lineageE (lineageDataE (VarE ty z))
-                        ((lineageProvE (VarE ty al)) `lineageAppendE`
-                         (lineageProvE (VarE ty  z)))
+             lineageE (lineageDataE (VarE ty' z))
+                        ((lineageProvE (VarE ty' al)) `lineageAppendE`
+                         (lineageProvE (VarE ty'  z)))
 
       -- comprehension that appends lineages of currently traversed collection
       -- and result of nested part of comprehension
       compLineageApp al = AppE Map (TupleConstE
-             (Tuple2E (LamE ty (lamAppend al)) bodyExp))
+             (Tuple2E (LamE ty' (lamAppend al)) bodyExp))
 
       -- comprehension over singleton list containing data originally assigned
       -- to comprehension binder
       compSingOrg al = AppE ConcatMap (TupleConstE
-             (Tuple2E (LamE ty'
-                            (\a -> subst a boundVar (compLineageApp al)))
-                      (singletonE ty' (lineageDataE
-                                   (VarE ty al)))))
+             (Tuple2E (LamE ty (\a -> subst a boundVar (compLineageApp al)))
+                      (singletonE ty (lineageDataE (VarE ty' al)))))
 
       -- if we had let-bindings we could define compSingOrg as:
       --
       -- compSingOrg al = LetE boundVar (lineageDataE (VarE ty al))
       --                                (compLineageApp al)
+  return (AppE ConcatMap (TupleConstE (Tuple2E (LamE ty'' compSingOrg) tbl')))
 
-  return (AppE ConcatMap (TupleConstE (Tuple2E
-                                       (LamE ty'' compSingOrg) tbl')))
-
--- L(xs ++ ys) = L(xs) ++ L(ys)
+-- append
 lineageTransform tyA tyK (AppE Append (TupleConstE (Tuple2E xs ys))) =
     do xs' <- lineageTransform tyA tyK xs
        ys' <- lineageTransform tyA tyK ys
        return (AppE Append (TupleConstE (Tuple2E xs' ys')))
 
--- L(reverse xs) = reverse (L(xs))
+-- reverse
 lineageTransform tyA tyK (AppE Reverse xs) = do
   xs' <- lineageTransform tyA tyK  xs
   return (AppE Reverse xs')
 
 -- zip
 lineageTransform tyA tyK (AppE Zip (TupleConstE (Tuple2E xs ys))) = do
-  let tyFst = case tyA of
-                   ListT (TupleT (Tuple2T t _)) -> ListT t
-                   _ -> $impossible
-
-      tySnd = case tyA of
-                   ListT (TupleT (Tuple2T _ t)) -> ListT t
-                   _ -> $impossible
-
-      annotTy = ListT (TupleT $ Tuple2T TextT tyK)
-
-      lineageRecTy :: Type c -> Type (LineageTransform c k)
-      lineageRecTy t = typeLT t tyK
+  let tyFst = ListT (fstTy (elemTy tyA))
+      tySnd = ListT (sndTy (elemTy tyA))
 
   xs' <- lineageTransform tyFst tyK xs
   ys' <- lineageTransform tySnd tyK ys
@@ -375,8 +328,8 @@ lineageTransform tyA tyK (AppE Zip (TupleConstE (Tuple2E xs ys))) = do
 
       tyX = case tyA of
           ListT (TupleT (Tuple2T t1 t2)) ->
-              TupleT (Tuple2T (TupleT (Tuple2T (lineageRecTy t1) annotTy))
-                              (TupleT (Tuple2T (lineageRecTy t2) annotTy)))
+              pairTy (lineageTy (typeLT t1 tyK) tyK)
+                     (lineageTy (typeLT t2 tyK) tyK)
           _ -> $impossible
 
       -- (\x -> { data = ((fst x).data, (snd x).data)
@@ -391,9 +344,8 @@ lineageTransform tyA tyK (AppE Zip (TupleConstE (Tuple2E xs ys))) = do
   return (AppE Map (TupleConstE (Tuple2E (LamE tyX lam) zipL)))
 
 -- variables
-lineageTransform _ tyK (VarE tyVar v) = do
-  let tyVar' = typeLT tyVar tyK
-  return (VarE tyVar' v)
+lineageTransform _ tyK (VarE tyVar v) =
+  return (VarE (typeLT tyVar tyK) v)
 
 -- constants
 lineageTransform _ _ e@(UnitE)         = return e
@@ -418,10 +370,7 @@ lineageTransform _ tyK e@(AppE Guard _) = do
 
 -- cons
 lineageTransform tyA tyK (AppE Cons (TupleConstE (Tuple2E x xs))) = do
-  let tyX = case tyA of
-                 ListT t -> t
-                 _       -> $impossible
-  x'  <- lineageTransform tyX tyK x
+  x'  <- lineageTransform (elemTy tyA) tyK x
   xs' <- lineageTransform tyA tyK xs
   return (AppE Cons (TupleConstE (Tuple2E (emptyLineageE tyK x') xs')))
 
@@ -437,39 +386,16 @@ lineageTransform tyA tyK (AppE (TupElem t) arg) = do
     lineageTransformTupElem t
 
 lineageTransform tyA tyK (AppE Fst a) = do
-  let tyTuple = TupleT (Tuple2T tyA $impossible)
-  a' <- lineageTransform tyTuple tyK a
+  a' <- lineageTransform (pairTy tyA $impossible) tyK a
   return (AppE Fst a')
 
 lineageTransform tyB tyK (AppE Snd a) = do
-  let tyTuple = TupleT (Tuple2T $impossible tyB)
-  a' <- lineageTransform tyTuple tyK a
+  a' <- lineageTransform (pairTy $impossible tyB) tyK a
   return (AppE Snd a')
 
-
--- NOT YET IMPLEMENTED
-
--- concatMap (\x. concatMap (\y. map (\z. (z.data)^(z.prov + x.prov)) L(f y)) [x.data]) L(xs)
---
--- L (filter f xs)
---
--- This produces a list of xs annotated with complete provenance:
---
--- (concatMap (\x. concatMap (\y. map (\z. (x.data)^(z.prov + x.prov)) L[f y]) [x.data]) L(xs))
---
--- filter (\x. only (map f [x.data])) L(xs)
---
--- James' translation
---
---   map (\(x,b). x) (filter (\(x,b). b)  (map (\x. (x, f(x.data))) L(xs)))
---
--- but this works only on paper. Again f(x.data) is not a valid expression
+-- Unsupported operators
 lineageTransform _ _ (AppE Filter           _) = $unimplemented
-
--- concat has type [[a]] -> [a].  According to our TF declaration if input is
--- [[a]] the return type is [L [a]], but we want [L a].
 lineageTransform _ _ (AppE Concat           _) = $unimplemented
-
 lineageTransform _ _ (AppE Sum              _) = $unimplemented
 lineageTransform _ _ (AppE Avg              _) = $unimplemented
 lineageTransform _ _ (AppE Maximum          _) = $unimplemented
@@ -529,6 +455,7 @@ lineageTransform _ _ (AppE Zip       _) = $impossible
 -- Lambdas should only appear inside AppE arguments
 lineageTransform _ _ (LamE _ _  ) = $impossible
 
+
 --------------------------------------------------------------------------------
 --             ACCESSING LINEAGE DATA AND PROVENANCE COMPONENTS               --
 --------------------------------------------------------------------------------
@@ -545,6 +472,7 @@ lineageProvQ (view -> (_, lin)) = lin
 emptyLineageQ :: (QA a, QA k) => Q a -> Q (Lineage a k)
 emptyLineageQ (Q a) = Q (emptyLineageE reifyTy a)
 
+
 --------------------------------------------------------------------------------
 --                      SMART HELPERS FOR CONSTRUCTING EXP                    --
 --------------------------------------------------------------------------------
@@ -556,13 +484,12 @@ lineageE row lin = TupleConstE (Tuple2E row lin)
 -- | Attach empty lineage to a value
 emptyLineageE :: Type k -> Exp a -> Exp (LineageE a k)
 emptyLineageE tyK a =
-    let tyAnnot = TupleT (Tuple2T TextT tyK)
-    in TupleConstE (Tuple2E a (ListE tyAnnot (S.empty)))
+    TupleConstE (Tuple2E a (ListE (annotEntryTy tyK) (S.empty)))
 
 -- | Lineage annotation constructor
 lineageAnnotE :: Type k -> Text -> Exp k -> Exp (LineageAnnotE k)
 lineageAnnotE tyK table_name key =
-    singletonE (TupleT $ Tuple2T TextT tyK)
+    singletonE (annotEntryTy tyK)
                (TupleConstE (Tuple2E (TextE table_name) key))
 
 -- | Append two lineage annotations
@@ -599,6 +526,7 @@ emptyLineageListE tyA tyK e =
     AppE Map (TupleConstE (Tuple2E
               (LamE tyA (emptyLineageLamE tyA tyK)) e))
 
+
 --------------------------------------------------------------------------------
 --                              SUBSTITUTION                                  --
 --------------------------------------------------------------------------------
@@ -624,3 +552,55 @@ subst x v (TupleConstE t) =
     let substTuple :: TupleConst a -> TupleConst a
         substTuple = $(mkSubstTuple 'x 'v 16)
     in TupleConstE (substTuple t)
+
+
+--------------------------------------------------------------------------------
+--                             OTHER HELPERS                                  --
+--------------------------------------------------------------------------------
+
+-- | Lineage type translation on Type expressions
+typeLT :: forall a k. Type a -> Type k -> Type (LineageTransform a k)
+typeLT UnitT       _ = UnitT
+typeLT BoolT       _ = BoolT
+typeLT CharT       _ = CharT
+typeLT IntegerT    _ = IntegerT
+typeLT DoubleT     _ = DoubleT
+typeLT TextT       _ = TextT
+typeLT DecimalT    _ = DecimalT
+typeLT ScientificT _ = ScientificT
+typeLT DayT        _ = DayT
+typeLT (ListT  t)  k = ListT (lineageTy (typeLT t k) k)
+typeLT (TupleT t)  k =
+    let typeLTTuple :: TupleType a -> Type (LineageTransform a k)
+        typeLTTuple = $(mkTypeLT 'k 16)
+    in typeLTTuple t
+typeLT (ArrowT _ _) _ = $impossible -- no lineage for arrows
+
+-- | Returns type of list elements
+elemTy :: Type [a] -> Type a
+elemTy (ListT t) = t
+elemTy _         = $impossible
+
+-- | Pair types
+pairTy :: Type a -> Type b -> Type (a, b)
+pairTy a b = TupleT (Tuple2T a b)
+
+-- | Type of first tuple component
+fstTy :: Type (a, b) -> Type a
+fstTy (TupleT (Tuple2T t _)) = t
+
+-- | Type of second tuple component
+sndTy :: Type (a, b) -> Type b
+sndTy (TupleT (Tuple2T _ t)) = t
+
+-- | Lineage annotation entry type
+annotEntryTy :: Type k -> Type (Text, k)
+annotEntryTy tyK = pairTy TextT tyK
+
+-- | Lineage annotation type
+annotTy :: Type k -> Type [(Text, k)]
+annotTy tyK = ListT (annotEntryTy tyK)
+
+-- | Type of values with lineage annotations
+lineageTy :: Type a -> Type k -> Type (a, [(Text, k)])
+lineageTy tyA tyK = pairTy tyA (annotTy tyK)
