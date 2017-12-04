@@ -1,5 +1,5 @@
-{-# LANGUAGE GADTs                  #-}
 {-# LANGUAGE FlexibleInstances      #-}
+{-# LANGUAGE GADTs                  #-}
 {-# LANGUAGE ScopedTypeVariables    #-}
 {-# LANGUAGE TemplateHaskell        #-}
 {-# LANGUAGE TypeFamilies           #-}
@@ -8,14 +8,19 @@
 
 {-# OPTIONS_GHC -Wno-orphans #-}
 
--- | Where-provenance representation and manipulation
+-- | This module implements data types and functions for where-provenance
+-- described in "Language-integrated provenance in Haskell" paper by Jan
+-- Stolarek and James Cheney.
 module Database.DSH.Provenance.Where (
 
-   WhereProvAnnot, WhereProv, ProvData, ProvAnnot,
-   where_prov_tableQ, where_prov_columnQ, where_prov_keyQ,
+   -- * Where-provenance data type
+   WhereProv,
 
-   dataQ, provQ, emptyProvQ
+   -- * Where-provenance projections
+   dataQ, provQ, where_prov_tableQ, where_prov_columnQ, where_prov_keyQ,
 
+   -- * Attaching bottom where-provenance to a value
+   emptyProvQ
  ) where
 
 import           Prelude       as P
@@ -48,7 +53,7 @@ instance TA (WhereProvAnnot a)
 
 -- Provenance annotation selectors written by hand rather than derived with
 -- generateTableSelectors, because generateTableSelectors cannot handle
--- polymorphic data types.
+-- polymorphic data types.  See DSH bug #7
 where_prov_tableQ :: (QA a) => Q (WhereProvAnnot a) -> Q Text
 where_prov_tableQ (view -> (table_, _, _)) = table_
 

@@ -252,6 +252,9 @@ translateApp f args =
 translateTable :: Ty.Type -> Table -> Compile CL.Expr
 translateTable bty (TableDB tableName colNames hints) = do
     let colNames' = fmap L.ColName colNames
+
+    -- if a table has where-provenance hint we need to run where-provenance
+    -- transformation
     case provenanceHint hints of
      WhereProvenance provColsHint -> do
        v <- prefixVar `fmap` freshVar
