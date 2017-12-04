@@ -654,6 +654,9 @@ mkLineageTransformTupleRHS names k = do
         tupleComponents = map tfCall names
     return (tupleType tupleComponents)
 
+
+-- QLT instances for tuples:
+--
 -- instance (QLT a1, ..., QLT an) => QLT (a1, ..., an) where
 --    type LT (a1, ..., an) k = (LT a1 k, ..., LT an k)
 --    ltEq _ k =
@@ -677,20 +680,23 @@ mkQLTTupleInstance n = do
                  [tupleType (map VarT ns), VarT k]
                  (tupleType (map (\name -> foldl' AppT (ConT (mkName "LT"))
                                                  [VarT name, VarT k] ) ns)))
-      -- ltEq _ k =
-      --   case (ltEq (Proxy :: Proxy a1) k, ..., ltEq (Proxy :: Proxy an) k) of
-      --     (Refl, Refl) -> Refl
+      -- ltEq (Proxy :: Proxy name) k
       proxy name = foldl' AppE (VarE (mkName "ltEq"))
                          [ SigE (ConE 'Proxy) (AppT (ConT ''Proxy) (VarT name))
                          , VarE k]
-      scrutinee  = TupE (map proxy ns)
+
+      -- ltEq _ k =
+      --   case (ltEq (Proxy :: Proxy a1) k, ..., ltEq (Proxy :: Proxy an) k) of
+      --     (Refl, Refl) -> Refl
       lteqDec = FunD (mkName "ltEq") [Clause [WildP, VarP k]
-               (NormalB $ CaseE scrutinee
+               (NormalB $ CaseE (TupE (map proxy ns))
                  [Match (TupP (map (const (ConP 'Refl [])) ns))
                         (NormalB (ConE 'Refl)) []]) []]
 
   return (InstanceD Nothing qltCtx qltHead [ltDec, lteqDec])
 
+-- Handling of tuple types in typeLT function
+--
 -- case tupleT of
 --   Tuple2T a1 a2 -> TupleT (Tuple2T (typeLT a1 k) (typeLT a2 k))
 --   ....
@@ -712,7 +718,7 @@ mkTypeLTMatch k n = do
                    (foldl' AppE (ConE (tupTyConstName "" n)) typeLTs)
   return (Match pat (NormalB bodyE) [])
 
--- Transformation of TupleConst constructors
+-- Lineage transformation for tuples (TupleConst constructors)
 mkLineageTransformTupleConst :: Name -> Name -> Int -> Q Exp
 mkLineageTransformTupleConst tyA tyK maxWidth = do
     lamArgName <- newName "tupleE"
@@ -739,13 +745,14 @@ mkLineageTransformTermMatch tyA tyK width = do
   let tyName :: Int -> Name
       tyName n = mkName $ "ty" ++ show n
 
+      -- (TupleN _ ... t ... _)
       mkPats :: Int -> Int -> [Pat] -> [Pat]
       mkPats n m acc | n == m    = mkPats n (m - 1) (VarP tyPatName : acc)
                      | m == 0    = acc
                      | otherwise = mkPats n (m - 1) (WildP : acc)
 
       -- tyN = match tyA with
-      --            TupleT (TupleN _ ... n ... _) -> n
+      --            TupleT (TupleN _ ... t ... _) -> t
       tyBody :: Int -> Dec
       tyBody n = FunD (tyName n)
         [ Clause []
@@ -756,6 +763,7 @@ mkLineageTransformTermMatch tyA tyK width = do
 
       tyDecs = map tyBody [1..width]
 
+      -- aN' <- lineageTransform tyN tyK aN
       mkRecCall :: (Name, Name, Int) -> Stmt
       mkRecCall (a, a', n) =
           BindS (VarP a')
@@ -773,6 +781,8 @@ mkLineageTransformTermMatch tyA tyK width = do
                     (NormalB $ DoE $ [LetS tyDecs] ++ recCalls ++ [retStmt])
                     [])
 
+-- Lineage transformation for tuple projections (TupElem constructors)
+--
 -- \tupElem -> case tupElem of
 --    Tup2_1 -> do let tyA' = TupleT (Tuple2T tyA impossible)
 --                 arg' <- lineageTransform tyA' tyK arg
@@ -810,10 +820,12 @@ mkLineageTransformTupElemMatch tyA tyK arg n m = do
 
   exps <- mkExps m n []
 
-  let letSt = LetS [FunD tyA' [Clause []
+  let -- let tyA' = TupleT (Tuple2T tyA impossible)
+      letSt = LetS [FunD tyA' [Clause []
                    (NormalB (AppE (ConE (mkName "TupleT"))
                       (foldl' AppE (ConE (tupTyConstName "" n)) exps)))
                    []]]
+      -- arg' <- lineageTransform tyA' tyK arg
       ltCallSt =
           BindS (VarP arg')
                 -- "lineageTransform" - fragile!
