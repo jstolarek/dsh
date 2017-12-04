@@ -214,7 +214,7 @@ lineage pk (Q a) =
    Q (castWith (apply Refl (ltEq (Proxy :: Proxy a) pk))
             (runLineage (lineageTransform reifyTy (reifyTy :: Type (Rep k)) a)))
 
-lineageTransform :: forall a k. Typeable k
+lineageTransform :: Typeable k
                  => Type a -> Type k -> Exp a
                  -> Compile (Exp (LineageTransform a k))
 
@@ -223,7 +223,7 @@ lineageTransform tyA tyK tbl@(TableE (TableDB name _ _) keyProj) = do
   let -- We have to perform runtime type equality to check that type of lineage
       -- key specified in a call to `lineage` matches the type returned by
       -- `keyProj` function stored in `TableE` constructor.
-      keyEquality :: forall k1 k2. (Typeable k1, Typeable k2)
+      keyEquality :: (Typeable k1, Typeable k2)
                   => Type k1 -> (Integer -> Exp k2) -> Maybe (k1 :~: k2)
       keyEquality _ _ = eqT
   case keyEquality tyK keyProj of
