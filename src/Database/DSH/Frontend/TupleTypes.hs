@@ -714,9 +714,9 @@ mkTypeLTMatch k n = do
 
 -- Transformation of TupleConst constructors
 mkLineageTransformTupleConst :: Name -> Name -> Int -> Q Exp
-mkLineageTransformTupleConst reifyA reifyK maxWidth = do
+mkLineageTransformTupleConst tyA tyK maxWidth = do
     lamArgName <- newName "tupleE"
-    matches    <- mapM (mkLineageTransformTermMatch reifyA reifyK) [2..maxWidth]
+    matches    <- mapM (mkLineageTransformTermMatch tyA tyK) [2..maxWidth]
     let lamBody = CaseE (VarE lamArgName) matches
     return $ LamE [VarP lamArgName] lamBody
 
@@ -731,37 +731,37 @@ mkLineageTransformTupleConst reifyA reifyK maxWidth = do
 --     aN' <- lineageTransform tyN tyK aN
 --     return (TupleConstE (TupleNE a1' ... aN')
 mkLineageTransformTermMatch :: Name -> Name -> Int -> Q Match
-mkLineageTransformTermMatch reifyA reifyK width = do
-  reifyPatName <- newName "t"
+mkLineageTransformTermMatch tyA tyK width = do
+  tyPatName <- newName "t"
   tupNames  <- mkNames "a" width
   tupNames' <- mkNames "b" width
 
-  let reifyName :: Int -> Name
-      reifyName n = mkName $ "ty" ++ show n
+  let tyName :: Int -> Name
+      tyName n = mkName $ "ty" ++ show n
 
       mkPats :: Int -> Int -> [Pat] -> [Pat]
-      mkPats n m acc | n == m    = mkPats n (m - 1) (VarP reifyPatName : acc)
+      mkPats n m acc | n == m    = mkPats n (m - 1) (VarP tyPatName : acc)
                      | m == 0    = acc
                      | otherwise = mkPats n (m - 1) (WildP : acc)
 
-      -- reifyN = match reifyA with
+      -- tyN = match tyA with
       --            TupleT (TupleN _ ... n ... _) -> n
-      reifyBody :: Int -> Dec
-      reifyBody n = FunD (reifyName n)
+      tyBody :: Int -> Dec
+      tyBody n = FunD (tyName n)
         [ Clause []
-          (NormalB $ CaseE (VarE reifyA)
+          (NormalB $ CaseE (VarE tyA)
             [Match (ConP (mkName "TupleT") [ConP (tupTyConstName "" width)
                                            (mkPats n width [])])
-                       (NormalB $ VarE reifyPatName) []]) []]
+                       (NormalB $ VarE tyPatName) []]) []]
 
-      reifyDecs = map reifyBody [1..width]
+      tyDecs = map tyBody [1..width]
 
       mkRecCall :: (Name, Name, Int) -> Stmt
       mkRecCall (a, a', n) =
           BindS (VarP a')
                 -- "lineageTransform" - fragile!
                 (AppE (AppE (AppE (VarE (mkName "lineageTransform"))
-                                  (VarE (reifyName n))) (VarE reifyK)) (VarE a))
+                                  (VarE (tyName n))) (VarE tyK)) (VarE a))
 
       recCalls = map mkRecCall (zip3 tupNames tupNames' [1..])
 
@@ -770,51 +770,55 @@ mkLineageTransformTermMatch reifyA reifyK width = do
   let retStmt = NoBindS (AppE (VarE 'Prelude.return) retTuple)
 
   return (Match (ConP (innerConst "" width) (map VarP tupNames))
-                    (NormalB $ DoE $ [LetS reifyDecs] ++ recCalls ++ [retStmt])
+                    (NormalB $ DoE $ [LetS tyDecs] ++ recCalls ++ [retStmt])
                     [])
 
 -- \tupElem -> case tupElem of
---    Tup2_1 -> do let tyA' = TupleT (Tuple2T tyA undefined)
+--    Tup2_1 -> do let tyA' = TupleT (Tuple2T tyA impossible)
 --                 arg' <- lineageTransform tyA' tyK arg
 --                 return (AppE (TupElem Tup2_1) arg')
 --
---    TupN_M -> do let tyA' = TupleT (TupleNT undefined ...
---                                            tyA ... undefined)
+--    TupN_M -> do let tyA' = TupleT (TupleNT impossible ...
+--                                            tyA ... impossible)
 --                 arg' <- lineageTransform tyA' tyK arg
 --                 return (AppE (TupElem TupN_M) arg')
 mkLineageTransformTupElem :: Name -> Name -> Name -> Int -> Q Exp
-mkLineageTransformTupElem reifyA reifyK arg maxWidth = do
+mkLineageTransformTupElem tyA tyK arg maxWidth = do
     lamArgName <- newName "tupElem"
     matches    <-
-        liftM concat (mapM (mkLineageTransformTupElemMatches reifyA reifyK arg)
+        liftM concat (mapM (mkLineageTransformTupElemMatches tyA tyK arg)
                            [2..maxWidth])
     let lamBody = CaseE (VarE lamArgName) matches
     return $ LamE [VarP lamArgName] lamBody
 
 mkLineageTransformTupElemMatches :: Name -> Name -> Name -> Int -> Q [Match]
-mkLineageTransformTupElemMatches reifyA reifyK arg n =
-    mapM (mkLineageTransformTupElemMatch reifyA reifyK arg n) [1..n]
+mkLineageTransformTupElemMatches tyA tyK arg n =
+    mapM (mkLineageTransformTupElemMatch tyA tyK arg n) [1..n]
 
 mkLineageTransformTupElemMatch :: Name -> Name -> Name -> Int -> Int -> Q Match
-mkLineageTransformTupElemMatch reifyA reifyK arg n m = do
-  reifyA' <- newName "tyA"
-  arg'    <- newName "arg"
-  let -- undefined ... tyA ... undefined
-      -- l positions, call to (reifyA Proxy) on k-th
-      mkExps :: Int -> Int -> [Exp] -> [Exp]
-      mkExps k l acc | k == l    = mkExps k (l - 1) (VarE reifyA : acc)
-                     | l == 0    = acc
-                     | otherwise = mkExps k (l - 1) (VarE 'undefined : acc)
+mkLineageTransformTupElemMatch tyA tyK arg n m = do
+  tyA' <- newName "tyA"
+  arg' <- newName "arg"
+  let -- impossible ... tyA ... impossible
+      -- l positions, call to tyA on k-th
+      mkExps :: Int -> Int -> [Exp] -> Q [Exp]
+      mkExps k l acc | k == l    = mkExps k (l - 1) (VarE tyA : acc)
+                     | l == 0    = return acc
+                     | otherwise = do
+                        imp <- impossible
+                        mkExps k (l - 1) (imp : acc)
 
-      letSt = LetS [FunD reifyA' [Clause []
+  exps <- mkExps m n []
+
+  let letSt = LetS [FunD tyA' [Clause []
                    (NormalB (AppE (ConE (mkName "TupleT"))
-                      (foldl' AppE (ConE (tupTyConstName "" n)) (mkExps m n []))))
+                      (foldl' AppE (ConE (tupTyConstName "" n)) exps)))
                    []]]
       ltCallSt =
           BindS (VarP arg')
                 -- "lineageTransform" - fragile!
                 (AppE (AppE (AppE (VarE (mkName "lineageTransform"))
-                                  (VarE reifyA')) (VarE reifyK)) (VarE arg))
+                                  (VarE tyA')) (VarE tyK)) (VarE arg))
 
   retE <- mkTupElemTerm n m (VarE arg')
 
